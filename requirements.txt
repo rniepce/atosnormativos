@@ -3,6 +3,7 @@ uvicorn
 streamlit
 google-cloud-aiplatform
 google-cloud-storage
+google-auth
 asyncpg
 pgvector
 sqlalchemy
