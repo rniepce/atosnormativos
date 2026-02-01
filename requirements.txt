@@ -1,0 +1,15 @@
+fastapi
+uvicorn
+streamlit
+google-cloud-aiplatform
+google-cloud-storage
+asyncpg
+pgvector
+sqlalchemy
+langchain-text-splitters
+pymupdf
+python-dotenv
+asyncio
+pydantic
+pydantic-settings
+requests
