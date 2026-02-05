@@ -166,7 +166,7 @@ async def get_db_connection():
         database=os.getenv('POSTGRES_DB')
     )
 
-async def process_file(file_path: Path, model: SentenceTransformer, conn) -> bool:
+async def process_file(file_path: Path, model: SentenceTransformer, conn, use_llm: bool = False) -> bool:
     """Process a single file: extract text, classify, chunk, embed, store."""
     filename = file_path.name
     logger.info(f"Processing: {filename}")
@@ -177,12 +177,32 @@ async def process_file(file_path: Path, model: SentenceTransformer, conn) -> boo
         logger.warning(f"Skipping {filename}: No text extracted or too short.")
         return False
     
-    # 2. Classify from filename
-    metadata = classify_from_filename(filename, file_path.parent.name)
-    logger.info(f"  Classified as: {metadata['tipo']} {metadata['numero']}/{metadata['ano']}")
+    # 2. Classify - use LLM if enabled, otherwise fallback to filename
+    metadata = None
+    if use_llm:
+        try:
+            from src.ingestion.classify_llm import classify_with_llm, chunk_by_articles
+            metadata = classify_with_llm(text, filename)
+        except Exception as e:
+            logger.warning(f"LLM classification failed: {e}")
     
-    # 3. Chunk the text
-    chunks = chunk_text(text)
+    if metadata is None:
+        # Fallback to filename-based classification
+        metadata = classify_from_filename(filename, file_path.parent.name)
+        logger.info(f"  Classified (filename): {metadata['tipo']} {metadata['numero']}/{metadata['ano']}")
+    else:
+        logger.info(f"  Classified (LLM): {metadata['tipo']} {metadata['numero']}/{metadata['ano']} - {metadata['status']}")
+    
+    # 3. Chunk the text - semantic if LLM available, otherwise simple
+    if use_llm:
+        try:
+            from src.ingestion.classify_llm import chunk_by_articles
+            chunks = chunk_by_articles(text, metadata)
+        except Exception as e:
+            logger.warning(f"Semantic chunking failed: {e}")
+            chunks = chunk_text(text)
+    else:
+        chunks = chunk_text(text)
     logger.info(f"  Created {len(chunks)} chunks")
     
     # 4. Generate embeddings
@@ -191,10 +211,10 @@ async def process_file(file_path: Path, model: SentenceTransformer, conn) -> boo
     # 5. Store in database
     try:
         async with conn.transaction():
-            # Insert document
+            # Insert document (includes orgao field)
             doc_id = await conn.fetchval("""
-                INSERT INTO documentos (filename, gcs_uri, tipo, numero, ano, status_vigencia, assunto_resumo, tags)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                INSERT INTO documentos (filename, gcs_uri, tipo, numero, ano, orgao, status_vigencia, assunto_resumo, tags)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                 RETURNING id
             """, 
                 filename,
@@ -202,6 +222,7 @@ async def process_file(file_path: Path, model: SentenceTransformer, conn) -> boo
                 metadata.get("tipo"),
                 metadata.get("numero"),
                 metadata.get("ano"),
+                metadata.get("orgao"),
                 metadata.get("status"),
                 metadata.get("assunto_resumo"),
                 metadata.get("tags", [])
@@ -229,6 +250,8 @@ async def main():
     parser = argparse.ArgumentParser(description="Ingest normative acts from folder (local embeddings)")
     parser.add_argument("--dir", required=True, help="Directory to ingest")
     parser.add_argument("--limit", type=int, default=0, help="Limit number of files (0 for all)")
+    parser.add_argument("--use-llm", action="store_true", help="Use LLM (Gemini) for classification and semantic chunking")
+    parser.add_argument("--clean", action="store_true", help="Clean database before ingestion (DELETE all existing data)")
     args = parser.parse_args()
     
     root_dir = Path(args.dir)
@@ -247,6 +270,18 @@ async def main():
         logger.error(f"Failed to connect to database: {e}")
         return
     
+    # Clean database if requested
+    if args.clean:
+        logger.warning("Cleaning database - deleting all existing data...")
+        try:
+            await conn.execute("DELETE FROM chunks")
+            await conn.execute("DELETE FROM documentos")
+            logger.info("Database cleaned successfully")
+        except Exception as e:
+            logger.error(f"Failed to clean database: {e}")
+            await conn.close()
+            return
+    
     # Find all files
     files_to_process = []
     for root, dirs, files in os.walk(root_dir):
@@ -258,6 +293,10 @@ async def main():
         files_to_process = files_to_process[:args.limit]
         
     logger.info(f"Found {len(files_to_process)} files to process")
+    if args.use_llm:
+        logger.info("LLM classification ENABLED (using Gemini)")
+    else:
+        logger.info("LLM classification DISABLED (using filename-based)")
     
     # Process files
     success = 0
@@ -266,7 +305,7 @@ async def main():
     for i, file_path in enumerate(files_to_process, 1):
         logger.info(f"[{i}/{len(files_to_process)}] Processing {file_path.name}")
         try:
-            if await process_file(file_path, model, conn):
+            if await process_file(file_path, model, conn, use_llm=args.use_llm):
                 success += 1
             else:
                 failed += 1

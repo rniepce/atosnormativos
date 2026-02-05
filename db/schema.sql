@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS documentos (
     tipo VARCHAR(50),
     numero VARCHAR(20),
     ano INTEGER,
+    orgao VARCHAR(100), -- Órgão emissor (Presidência, Corregedoria, etc.)
     status_vigencia VARCHAR(20), -- 'VIGENTE', 'REVOGADO'
     assunto_resumo TEXT,
     tags TEXT[], 
@@ -21,7 +22,7 @@ CREATE TABLE IF NOT EXISTS chunks (
     id SERIAL PRIMARY KEY,
     documento_id INTEGER REFERENCES documentos(id) ON DELETE CASCADE,
     conteudo_texto TEXT NOT NULL, -- O trecho da lei
-    embedding vector(768) -- O vetor gerado pelo Vertex AI (text-embedding-004)
+    embedding vector(384) -- O vetor gerado pelo all-MiniLM-L6-v2 (384-dim)
 );
 
 -- Índices para performance

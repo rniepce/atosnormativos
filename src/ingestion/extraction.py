@@ -38,3 +38,32 @@ def is_searchable_pdf(pdf_path: str) -> bool:
         return False
     except Exception:
         return False
+
+def extract_text_from_doc_docx(file_path: str) -> Optional[str]:
+    """
+    Extracts text from .doc and .docx files using macOS 'textutil'.
+    Returns the full text of the document.
+    """
+    import subprocess
+    import shutil
+    
+    if not shutil.which("textutil"):
+        logger.error("textutil not found. This function requires macOS.")
+        return None
+
+    try:
+        # textutil -convert txt -stdout "file_path"
+        result = subprocess.run(
+            ["textutil", "-convert", "txt", "-stdout", file_path],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        return result.stdout
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Error converting {file_path}: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"Unexpected error processing {file_path}: {e}")
+        return None
+
