@@ -1,56 +1,66 @@
 import logging
-import json
+import os
+from typing import List
 import torch
-from typing import List, Optional
-# from src.utils.vertex import VertexAIClient  # REMOVED
 from sentence_transformers import SentenceTransformer
 from src.utils.db import get_db_connection
 from src.backend.models import SearchRequest, SearchResultItem
 
 logger = logging.getLogger(__name__)
 
-# Global model cache to avoid reloading on every request if service is re-instantiated
+# Global model cache
 _EMBEDDING_MODEL = None
+_GEMINI_MODEL = None
 
-def get_model():
+def get_embedding_model():
     global _EMBEDDING_MODEL
     if _EMBEDDING_MODEL is None:
-        logger.info("Loading usage-time embedding model (all-MiniLM-L6-v2)...")
+        logger.info("Loading embedding model (all-MiniLM-L6-v2)...")
         try:
-            # Try offline first/fallback
             _EMBEDDING_MODEL = SentenceTransformer('all-MiniLM-L6-v2', local_files_only=True)
         except Exception as e:
             logger.warning(f"Could not load local model, trying online: {e}")
             _EMBEDDING_MODEL = SentenceTransformer('all-MiniLM-L6-v2')
     return _EMBEDDING_MODEL
 
+def get_gemini_model():
+    global _GEMINI_MODEL
+    if _GEMINI_MODEL is None:
+        try:
+            import google.generativeai as genai
+            api_key = os.getenv("GEMINI_API_KEY")
+            if api_key:
+                genai.configure(api_key=api_key)
+                _GEMINI_MODEL = genai.GenerativeModel('gemini-2.0-flash')
+                logger.info("Gemini model initialized successfully")
+            else:
+                logger.warning("GEMINI_API_KEY not set, LLM answers disabled")
+        except Exception as e:
+            logger.error(f"Failed to initialize Gemini: {e}")
+    return _GEMINI_MODEL
+
 class SearchService:
     def __init__(self):
-        # self.vertex_client = VertexAIClient() # REMOVED
-        self.model = get_model() # Load local model
+        self.embedding_model = get_embedding_model()
+        self.gemini_model = get_gemini_model()
 
     async def rewrite_query(self, original_query: str) -> str:
-        """
-        Mock rewrite: just return original query since we have no LLM.
-        """
-        # rewritten = self.vertex_client.generate_text(...)
+        """Optionally rewrite query using Gemini for better search."""
         return original_query.strip()
 
     async def search(self, request: SearchRequest) -> List[SearchResultItem]:
         conn = await get_db_connection()
         try:
-            # 1. Rewrite Query (Mocked)
             rewritten_query = await self.rewrite_query(request.query)
             logger.info(f"Query: {rewritten_query}")
 
-            # 2. Generate Embedding (Local)
-            # embedding = self.vertex_client.get_query_embedding(rewritten_query)
-            embedding = self.model.encode([rewritten_query])[0]
+            # Generate embedding
+            embedding = self.embedding_model.encode([rewritten_query])[0]
             embedding_list = embedding.tolist()
             
-            # 3. Build Query
+            # Build query with filters
             where_clauses = []
-            params = [str(embedding_list)] # $1 is embedding (passed as string for pgvector)
+            params = [str(embedding_list)]
             param_idx = 2
             
             if request.filter_status:
@@ -72,7 +82,6 @@ class SearchService:
             if where_sql:
                 where_sql = f"AND {where_sql}"
             
-            # Use 384-dim vector casting if needed, or just vector
             query_sql = f"""
                 SELECT 
                     c.documento_id, 
@@ -85,7 +94,7 @@ class SearchService:
                     1 - (c.embedding <=> $1::vector) as similarity
                 FROM chunks c
                 JOIN documentos d ON c.documento_id = d.id
-                WHERE 1 - (c.embedding <=> $1::vector) > 0.3 -- Threshold lowered for local model
+                WHERE 1 - (c.embedding <=> $1::vector) > 0.3
                 {where_sql}
                 ORDER BY c.embedding <=> $1::vector ASC
                 LIMIT 10
@@ -112,19 +121,59 @@ class SearchService:
             await conn.close()
 
     async def generate_answer(self, query: str, context: List[SearchResultItem]) -> str:
-        """
-        Generates a static answer concatenating context since we have no LLM.
-        """
+        """Generate answer using Gemini based on retrieved context."""
         if not context:
             return "Não encontrei normas relevantes para sua pergunta nos critérios selecionados."
-            
-        # Mock Answer Generation
+        
+        # Build context for LLM
+        context_text = ""
+        for i, item in enumerate(context, 1):
+            context_text += f"\n--- Documento {i}: {item.tipo} {item.numero}/{item.ano} ({item.filename}) ---\n"
+            context_text += f"{item.chunk_text}\n"
+        
+        # If Gemini is available, use it
+        if self.gemini_model:
+            try:
+                prompt = f"""Você é um assistente jurídico especializado em atos normativos do TJMG (Tribunal de Justiça de Minas Gerais).
+
+Com base nos documentos abaixo, responda à pergunta do usuário de forma clara, objetiva e fundamentada, citando os atos normativos relevantes.
+
+DOCUMENTOS ENCONTRADOS:
+{context_text}
+
+PERGUNTA DO USUÁRIO: {query}
+
+INSTRUÇÕES:
+- Responda em português brasileiro
+- Cite os números e anos das portarias/resoluções quando relevante
+- Se não houver informação suficiente, indique isso claramente
+- Seja conciso mas completo
+
+RESPOSTA:"""
+
+                response = self.gemini_model.generate_content(prompt)
+                answer = response.text
+                
+                # Add sources footer
+                answer += "\n\n---\n**📚 Fontes consultadas:**\n"
+                for item in context[:5]:
+                    answer += f"- {item.tipo} {item.numero}/{item.ano} ({item.filename})\n"
+                
+                return answer
+                
+            except Exception as e:
+                logger.error(f"Gemini error: {e}")
+                return self._fallback_answer(query, context)
+        else:
+            return self._fallback_answer(query, context)
+    
+    def _fallback_answer(self, query: str, context: List[SearchResultItem]) -> str:
+        """Fallback when Gemini is not available."""
         answer = f"**Resultados encontrados para:** '{query}'\n\n"
-        answer += "Como não temos conexão com LLM (GCP), exibo abaixo os trechos relevantes encontrados:\n\n"
+        answer += "_(LLM não configurado - exibindo trechos relevantes)_\n\n"
         
         for i, item in enumerate(context, 1):
-            answer += f"**{i}. {item.tipo} {item.numero}/{item.ano}** (Semelhança: {item.score:.2f})\n"
-            answer += f"_{item.chunk_text[:300]}..._\n"
-            answer += f"[Ver documento completo: {item.filename}]\n\n"
+            answer += f"**{i}. {item.tipo} {item.numero}/{item.ano}** (Relevância: {item.score:.2f})\n"
+            answer += f"_{item.chunk_text[:400]}..._\n\n"
             
         return answer

@@ -4,6 +4,7 @@ streamlit
 google-cloud-aiplatform
 google-cloud-storage
 google-auth
+google-generativeai
 asyncpg
 pgvector
 sqlalchemy
