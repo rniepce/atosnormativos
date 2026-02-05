@@ -28,11 +28,21 @@ def get_gemini_model():
     if _GEMINI_MODEL is None:
         try:
             import google.generativeai as genai
-            api_key = os.getenv("GEMINI_API_KEY")
+            api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
             if api_key:
                 genai.configure(api_key=api_key)
-                _GEMINI_MODEL = genai.GenerativeModel('gemini-3.0-flash')
-                logger.info("Gemini model initialized successfully")
+                # Try different model names (Gemini 2.5 Pro, then 2.0 Flash as fallback)
+                model_names = ['gemini-2.5-pro-preview-06-05', 'gemini-2.0-flash', 'gemini-1.5-flash']
+                for model_name in model_names:
+                    try:
+                        _GEMINI_MODEL = genai.GenerativeModel(model_name)
+                        logger.info(f"Gemini model '{model_name}' initialized successfully")
+                        break
+                    except Exception as e:
+                        logger.warning(f"Could not load {model_name}: {e}")
+                        continue
+                if _GEMINI_MODEL is None:
+                    logger.error("No Gemini model could be loaded")
             else:
                 logger.warning("GEMINI_API_KEY not set, LLM answers disabled")
         except Exception as e:
