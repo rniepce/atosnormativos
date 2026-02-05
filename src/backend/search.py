@@ -31,7 +31,7 @@ def get_gemini_model():
             api_key = os.getenv("GEMINI_API_KEY")
             if api_key:
                 genai.configure(api_key=api_key)
-                _GEMINI_MODEL = genai.GenerativeModel('gemini-2.0-flash')
+                _GEMINI_MODEL = genai.GenerativeModel('gemini-3.0-flash')
                 logger.info("Gemini model initialized successfully")
             else:
                 logger.warning("GEMINI_API_KEY not set, LLM answers disabled")
