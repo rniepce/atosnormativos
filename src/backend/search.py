@@ -32,7 +32,7 @@ def get_gemini_model():
             if api_key:
                 genai.configure(api_key=api_key)
                 # Try different model names (Gemini 2.5 Pro, then 2.0 Flash as fallback)
-                model_names = ['gemini-2.5-pro-preview-06-05', 'gemini-2.0-flash', 'gemini-1.5-flash']
+                model_names = ['gemini-3-flash-preview', 'gemini-2.5-pro-preview-06-05', 'gemini-2.0-flash', 'gemini-1.5-flash']
                 for model_name in model_names:
                     try:
                         _GEMINI_MODEL = genai.GenerativeModel(model_name)
