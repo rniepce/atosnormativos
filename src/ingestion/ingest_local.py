@@ -31,10 +31,10 @@ EMBEDDING_MODEL = None
 def get_embedding_model():
     global EMBEDDING_MODEL
     if EMBEDDING_MODEL is None:
-        print("Loading embedding model...", flush=True)
-        # Using smaller model for faster loading
-        EMBEDDING_MODEL = SentenceTransformer('all-MiniLM-L6-v2')
-        print("Embedding model loaded!", flush=True)
+        print("Loading BGE-large embedding model (1024-dim)...", flush=True)
+        # Using BGE-large for high quality 1024-dim embeddings
+        EMBEDDING_MODEL = SentenceTransformer('BAAI/bge-large-en-v1.5')
+        print(f"Embedding model loaded! Dim: {EMBEDDING_MODEL.get_sentence_embedding_dimension()}", flush=True)
     return EMBEDDING_MODEL
 
 def extract_text_from_doc_docx(file_path: str) -> Optional[str]:

@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS chunks (
     id SERIAL PRIMARY KEY,
     documento_id INTEGER REFERENCES documentos(id) ON DELETE CASCADE,
     conteudo_texto TEXT NOT NULL, -- O trecho da lei
-    embedding vector(384) -- O vetor gerado pelo all-MiniLM-L6-v2 (384-dim)
+    embedding vector(1024) -- O vetor gerado pelo BAAI/bge-m3 (1024-dim)
 );
 
 -- Índices para performance

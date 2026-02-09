@@ -15,12 +15,12 @@ _GEMINI_MODEL = None
 def get_embedding_model():
     global _EMBEDDING_MODEL
     if _EMBEDDING_MODEL is None:
-        logger.info("Loading embedding model (all-MiniLM-L6-v2)...")
+        logger.info("Loading embedding model (BAAI/bge-large-en-v1.5, 1024-dim)...")
         try:
-            _EMBEDDING_MODEL = SentenceTransformer('all-MiniLM-L6-v2', local_files_only=True)
+            _EMBEDDING_MODEL = SentenceTransformer('BAAI/bge-large-en-v1.5', local_files_only=True)
         except Exception as e:
             logger.warning(f"Could not load local model, trying online: {e}")
-            _EMBEDDING_MODEL = SentenceTransformer('all-MiniLM-L6-v2')
+            _EMBEDDING_MODEL = SentenceTransformer('BAAI/bge-large-en-v1.5')
     return _EMBEDDING_MODEL
 
 def get_gemini_model():
