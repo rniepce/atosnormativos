@@ -42,6 +42,12 @@ with st.sidebar:
     st.title("⚖️ Atos Normativos TJMG")
     st.markdown("---")
     
+    st.header("Modelo LLM")
+    llm_options = {"Gemini": "gemini", "Amazônia IA": "amazonia"}
+    llm_label = st.selectbox("Provedor", list(llm_options.keys()), index=0)
+    llm_provider = llm_options[llm_label]
+    
+    st.markdown("---")
     st.header("Filtros de Busca")
     filter_status = st.selectbox("Status", ["", "VIGENTE", "REVOGADO"], index=0)
     filter_tipo = st.selectbox("Tipo de Ato", ["", "Portaria", "Resolução", "Provimento", "Recomendação", "Instrução Normativa"], index=0)
@@ -82,7 +88,7 @@ if prompt := st.chat_input("Digite sua dúvida sobre atos normativos..."):
         with st.spinner("Pesquisando e analisando..."):
             try:
                 # Prepare payload
-                payload = {"query": prompt}
+                payload = {"query": prompt, "llm_provider": llm_provider}
                 if filter_status:
                     payload["filter_status"] = filter_status
                 if filter_tipo:

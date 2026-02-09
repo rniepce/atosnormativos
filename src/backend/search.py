@@ -8,9 +8,10 @@ from src.backend.models import SearchRequest, SearchResultItem
 
 logger = logging.getLogger(__name__)
 
-# Global model cache
+# Global model/client caches
 _EMBEDDING_MODEL = None
 _GEMINI_MODEL = None
+_AMAZONIA_CLIENT = None
 
 def get_embedding_model():
     global _EMBEDDING_MODEL
@@ -44,21 +45,68 @@ def get_gemini_model():
                 if _GEMINI_MODEL is None:
                     logger.error("No Gemini model could be loaded")
             else:
-                logger.warning("GEMINI_API_KEY not set, LLM answers disabled")
+                logger.warning("GEMINI_API_KEY not set, Gemini LLM answers disabled")
         except Exception as e:
             logger.error(f"Failed to initialize Gemini: {e}")
     return _GEMINI_MODEL
 
+def get_amazonia_client():
+    """Initialize the Amazônia IA client (OpenAI-compatible)."""
+    global _AMAZONIA_CLIENT
+    if _AMAZONIA_CLIENT is None:
+        api_key = os.getenv("AMAZONIA_API_KEY")
+        if api_key:
+            try:
+                from openai import OpenAI
+                _AMAZONIA_CLIENT = OpenAI(
+                    api_key=api_key,
+                    base_url="https://amazonia-a.amazoniaia.com.br/v1"
+                )
+                logger.info("Amazônia IA client initialized successfully")
+            except Exception as e:
+                logger.error(f"Failed to initialize Amazônia IA client: {e}")
+        else:
+            logger.warning("AMAZONIA_API_KEY not set, Amazônia IA answers disabled")
+    return _AMAZONIA_CLIENT
+
+
+def _llm_generate(prompt: str, provider: str = "gemini") -> str:
+    """
+    Abstraction layer: generate text from either Gemini or Amazônia IA.
+    Returns the generated text, or raises on failure.
+    """
+    if provider == "amazonia":
+        client = get_amazonia_client()
+        if client is None:
+            raise RuntimeError("Amazônia IA client not configured (missing AMAZONIA_API_KEY)")
+        resp = client.chat.completions.create(
+            model="rodrigomalossi/amazonia-a",
+            messages=[
+                {"role": "system", "content": "Você é Amazônia-a, um assistente jurídico conciso e prestativo."},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.6,
+            top_p=0.9,
+        )
+        return resp.choices[0].message.content.strip()
+    else:
+        # Default: Gemini
+        model = get_gemini_model()
+        if model is None:
+            raise RuntimeError("Gemini model not configured (missing GEMINI_API_KEY)")
+        response = model.generate_content(prompt)
+        return response.text.strip()
+
+
 class SearchService:
     def __init__(self):
         self.embedding_model = get_embedding_model()
-        self.gemini_model = get_gemini_model()
+        # Lazy-init both LLM backends (they cache globally)
+        get_gemini_model()
+        get_amazonia_client()
 
-    async def rewrite_query(self, original_query: str) -> str:
-        """Optionally rewrite query using Gemini for better legal search."""
-        if not self.gemini_model:
-            return original_query.strip()
-        
+    async def rewrite_query(self, original_query: str, provider: str = "gemini") -> str:
+        """Optionally rewrite query using LLM for better legal search."""
         try:
             prompt = f"""Reescreva a seguinte pergunta do usuário para otimizar a busca em um sistema de atos normativos jurídicos do TJMG.
 Mantenha os termos técnicos jurídicos e adicione sinônimos relevantes.
@@ -67,17 +115,16 @@ Responda APENAS com a query reescrita, sem explicações.
 Query original: {original_query}
 
 Query otimizada:"""
-            response = self.gemini_model.generate_content(prompt)
-            rewritten = response.text.strip()
-            logger.info(f"Query rewritten: '{original_query}' -> '{rewritten}'")
+            rewritten = _llm_generate(prompt, provider)
+            logger.info(f"Query rewritten ({provider}): '{original_query}' -> '{rewritten}'")
             return rewritten
         except Exception as e:
-            logger.warning(f"Query rewrite failed: {e}")
+            logger.warning(f"Query rewrite failed ({provider}): {e}")
             return original_query.strip()
 
-    async def _rerank_with_llm(self, query: str, results: List[SearchResultItem]) -> List[SearchResultItem]:
+    async def _rerank_with_llm(self, query: str, results: List[SearchResultItem], provider: str = "gemini") -> List[SearchResultItem]:
         """Use LLM to rerank results by relevance to the query."""
-        if not self.gemini_model or len(results) <= 3:
+        if len(results) <= 3:
             return results
         
         try:
@@ -98,8 +145,7 @@ DOCUMENTOS:
 
 ORDEM DE RELEVÂNCIA (números separados por vírgula):"""
 
-            response = self.gemini_model.generate_content(prompt)
-            order_text = response.text.strip()
+            order_text = _llm_generate(prompt, provider)
             
             # Parse the order
             order = []
@@ -117,19 +163,20 @@ ORDEM DE RELEVÂNCIA (números separados por vírgula):"""
                 # Add any missing results at the end
                 remaining = [r for i, r in enumerate(results) if i not in order]
                 reranked.extend(remaining)
-                logger.info(f"Reranked {len(results)} results")
+                logger.info(f"Reranked {len(results)} results ({provider})")
                 return reranked
             
         except Exception as e:
-            logger.warning(f"Reranking failed: {e}")
+            logger.warning(f"Reranking failed ({provider}): {e}")
         
         return results
 
     async def search(self, request: SearchRequest) -> List[SearchResultItem]:
         conn = await get_db_connection()
+        provider = request.llm_provider
         try:
             # Optionally rewrite query for better search
-            rewritten_query = await self.rewrite_query(request.query)
+            rewritten_query = await self.rewrite_query(request.query, provider)
             logger.info(f"Query: {rewritten_query}")
 
             # Generate embedding
@@ -240,7 +287,7 @@ ORDEM DE RELEVÂNCIA (números separados por vírgula):"""
             
             # Rerank with LLM if enabled
             if request.use_reranking and len(results) > 3:
-                results = await self._rerank_with_llm(request.query, results)
+                results = await self._rerank_with_llm(request.query, results, provider)
             
             # Return top 10 after reranking
             return results[:10]
@@ -248,8 +295,8 @@ ORDEM DE RELEVÂNCIA (números separados por vírgula):"""
         finally:
             await conn.close()
 
-    async def generate_answer(self, query: str, context: List[SearchResultItem]) -> str:
-        """Generate answer using Gemini based on retrieved context."""
+    async def generate_answer(self, query: str, context: List[SearchResultItem], provider: str = "gemini") -> str:
+        """Generate answer using the selected LLM based on retrieved context."""
         if not context:
             return "Não encontrei normas relevantes para sua pergunta nos critérios selecionados."
         
@@ -259,10 +306,8 @@ ORDEM DE RELEVÂNCIA (números separados por vírgula):"""
             context_text += f"\n--- Documento {i}: {item.tipo} {item.numero}/{item.ano} ({item.filename}) ---\n"
             context_text += f"{item.chunk_text}\n"
         
-        # If Gemini is available, use it
-        if self.gemini_model:
-            try:
-                prompt = f"""Você é um assistente jurídico especializado em atos normativos do TJMG (Tribunal de Justiça de Minas Gerais).
+        try:
+            prompt = f"""Você é um assistente jurídico especializado em atos normativos do TJMG (Tribunal de Justiça de Minas Gerais).
 
 Com base nos documentos abaixo, responda à pergunta do usuário de forma clara, objetiva e fundamentada, citando os atos normativos relevantes.
 
@@ -279,24 +324,21 @@ INSTRUÇÕES:
 
 RESPOSTA:"""
 
-                response = self.gemini_model.generate_content(prompt)
-                answer = response.text
-                
-                # Add sources footer
-                answer += "\n\n---\n**📚 Fontes consultadas:**\n"
-                for item in context[:5]:
-                    answer += f"- {item.tipo} {item.numero}/{item.ano} ({item.filename})\n"
-                
-                return answer
-                
-            except Exception as e:
-                logger.error(f"Gemini error: {e}")
-                return self._fallback_answer(query, context)
-        else:
+            answer = _llm_generate(prompt, provider)
+            
+            # Add sources footer
+            answer += "\n\n---\n**📚 Fontes consultadas:**\n"
+            for item in context[:5]:
+                answer += f"- {item.tipo} {item.numero}/{item.ano} ({item.filename})\n"
+            
+            return answer
+            
+        except Exception as e:
+            logger.error(f"LLM error ({provider}): {e}")
             return self._fallback_answer(query, context)
     
     def _fallback_answer(self, query: str, context: List[SearchResultItem]) -> str:
-        """Fallback when Gemini is not available."""
+        """Fallback when no LLM is available."""
         answer = f"**Resultados encontrados para:** '{query}'\n\n"
         answer += "_(LLM não configurado - exibindo trechos relevantes)_\n\n"
         

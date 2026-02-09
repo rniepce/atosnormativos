@@ -18,3 +18,4 @@ requests
 python-multipart
 torch
 sentence-transformers
+openai

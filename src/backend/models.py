@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 class SearchRequest(BaseModel):
     query: str
@@ -9,6 +9,7 @@ class SearchRequest(BaseModel):
     prioritize_vigente: bool = Field(True, description="Boost VIGENTE documents in ranking")
     use_hybrid_search: bool = Field(True, description="Combine vector + keyword search")
     use_reranking: bool = Field(True, description="Use LLM to rerank results")
+    llm_provider: Literal["gemini", "amazonia"] = Field("gemini", description="LLM provider to use for answer generation")
 
 class SearchResultItem(BaseModel):
     document_id: int
