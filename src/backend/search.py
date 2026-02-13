@@ -171,9 +171,22 @@ ORDEM DE RELEVÂNCIA (números separados por vírgula):"""
         
         return results
 
+    def _detect_recency_intent(self, query: str) -> bool:
+        """Check if query implies a need for recent documents."""
+        keywords = ["recente", "novo", "atual", "último", "2024", "2025", "hoje", "agora"]
+        query_lower = query.lower()
+        return any(k in query_lower for k in keywords)
+
     async def search(self, request: SearchRequest) -> List[SearchResultItem]:
         conn = await get_db_connection()
         provider = request.llm_provider
+        
+        # Detect recency intent if not explicitly set
+        prioritize_recency = request.prioritize_recency
+        if not prioritize_recency and self._detect_recency_intent(request.query):
+            prioritize_recency = True
+            logger.info(f"Recency intent detected for query: '{request.query}'")
+
         try:
             # Optionally rewrite query for better search
             rewritten_query = await self.rewrite_query(request.query, provider)
@@ -181,27 +194,35 @@ ORDEM DE RELEVÂNCIA (números separados por vírgula):"""
 
             # Generate embedding
             embedding = self.embedding_model.encode([rewritten_query])[0]
-            embedding_list = embedding.tolist()
+            embedding_str = str(embedding.tolist())
             
+            # Initialize params with vector ($1)
+            params = [embedding_str]
+            
+            # If hybrid search, $2 is the text query. Otherwise $2 is next param.
+            if request.use_hybrid_search:
+                params.append(rewritten_query)
+
             # Build query with filters
             where_clauses = []
-            params = [str(embedding_list), rewritten_query]  # $1 = vector, $2 = text query
-            param_idx = 3
+            where_clauses = []
             
+            # Helper to add param and get its placeholder index
+            def add_param(value):
+                params.append(value)
+                return len(params)
+
             if request.filter_status:
-                where_clauses.append(f"d.status_vigencia = ${param_idx}")
-                params.append(request.filter_status)
-                param_idx += 1
+                idx = add_param(request.filter_status)
+                where_clauses.append(f"d.status_vigencia = ${idx}")
             
             if request.filter_tipo:
-                where_clauses.append(f"d.tipo = ${param_idx}")
-                params.append(request.filter_tipo)
-                param_idx += 1
+                idx = add_param(request.filter_tipo)
+                where_clauses.append(f"d.tipo = ${idx}")
                 
             if request.filter_ano:
-                where_clauses.append(f"d.ano = ${param_idx}")
-                params.append(request.filter_ano)
-                param_idx += 1
+                idx = add_param(request.filter_ano)
+                where_clauses.append(f"d.ano = ${idx}")
 
             where_sql = " AND ".join(where_clauses)
             if where_sql:
@@ -210,6 +231,18 @@ ORDEM DE RELEVÂNCIA (números separados por vírgula):"""
             # Hybrid search: vector + BM25 keyword
             # vigente_boost: +0.15 for VIGENTE documents
             if request.use_hybrid_search:
+                # Recency boost logic
+                recency_boost_sql = "0"
+                if prioritize_recency:
+                    # +0.25 for 2025, +0.15 for 2024
+                    recency_boost_sql = """
+                        CASE 
+                            WHEN d.ano = 2025 THEN 0.25 
+                            WHEN d.ano = 2024 THEN 0.15 
+                            ELSE 0 
+                        END
+                    """
+
                 query_sql = f"""
                     WITH vector_search AS (
                         SELECT 
@@ -222,7 +255,8 @@ ORDEM DE RELEVÂNCIA (números separados por vírgula):"""
                             d.orgao,
                             d.status_vigencia, 
                             c.conteudo_texto,
-                            1 - (c.embedding <=> $1::vector) as vector_score
+                            1 - (c.embedding <=> $1::vector) as vector_score,
+                            {recency_boost_sql} as recency_score
                         FROM chunks c
                         JOIN documentos d ON c.documento_id = d.id
                         WHERE 1 - (c.embedding <=> $1::vector) > 0.25
@@ -241,7 +275,8 @@ ORDEM DE RELEVÂNCIA (números separados por vírgula):"""
                         v.*,
                         COALESCE(k.keyword_score, 0) as keyword_score,
                         (0.7 * v.vector_score + 0.3 * COALESCE(k.keyword_score, 0) + 
-                         CASE WHEN v.status_vigencia = 'VIGENTE' THEN 0.15 ELSE 0 END) as combined_score
+                         CASE WHEN v.status_vigencia = 'VIGENTE' THEN 0.15 ELSE 0 END +
+                         v.recency_score) as combined_score
                     FROM vector_search v
                     LEFT JOIN keyword_search k ON v.id = k.id
                     ORDER BY combined_score DESC
@@ -249,6 +284,11 @@ ORDEM DE RELEVÂNCIA (números separados por vírgula):"""
                 """
             else:
                 # Simple vector search with vigente boost
+                # Simple vector search with similar logic
+                recency_boost_sql = "0"
+                if prioritize_recency:
+                    recency_boost_sql = "CASE WHEN d.ano = 2025 THEN 0.25 WHEN d.ano = 2024 THEN 0.15 ELSE 0 END"
+
                 vigente_boost = "CASE WHEN d.status_vigencia = 'VIGENTE' THEN 0.15 ELSE 0 END" if request.prioritize_vigente else "0"
                 query_sql = f"""
                     SELECT 
@@ -260,7 +300,7 @@ ORDEM DE RELEVÂNCIA (números separados por vírgula):"""
                         d.orgao,
                         d.status_vigencia, 
                         c.conteudo_texto,
-                        (1 - (c.embedding <=> $1::vector) + {vigente_boost}) as combined_score
+                        (1 - (c.embedding <=> $1::vector) + {vigente_boost} + {recency_boost_sql}) as combined_score
                     FROM chunks c
                     JOIN documentos d ON c.documento_id = d.id
                     WHERE 1 - (c.embedding <=> $1::vector) > 0.25
