@@ -334,7 +334,7 @@ RESPOSTA:"""
             return answer
             
         except Exception as e:
-            logger.error(f"LLM error ({provider}): {e}")
+            logger.error(f"LLM error ({provider}): {e}", exc_info=True)
             return self._fallback_answer(query, context)
     
     def _fallback_answer(self, query: str, context: List[SearchResultItem]) -> str:
