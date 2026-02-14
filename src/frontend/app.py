@@ -531,17 +531,6 @@ st.markdown("""
 # ═══════════════════════════════════════════════════════════════
 #  CHAT HISTORY
 # ═══════════════════════════════════════════════════════════════
-if not st.session_state.messages:
-    st.markdown("""
-    <div class="empty-state">
-        <div class="empty-state-icon">⚖️</div>
-        <div class="empty-state-text">Nenhuma conversa ainda</div>
-        <div class="empty-state-hint">
-            Digite uma pergunta abaixo para começar a consultar os atos normativos.
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
