@@ -1,7 +1,5 @@
 fastapi
 uvicorn
-streamlit
-google-cloud-aiplatform
 google-cloud-storage
 google-auth
 google-generativeai

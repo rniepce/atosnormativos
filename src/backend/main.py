@@ -3,6 +3,8 @@ load_dotenv()
 
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from src.backend.models import SearchRequest, SearchResponse
 from src.backend.search import SearchService
 from src.ingestion.extraction import extract_text_from_pdf
@@ -32,11 +34,8 @@ app.add_middleware(
 # Service instance (singleton-ish for simple app)
 search_service = SearchService()
 
-@app.get("/")
-async def root():
-    return {"message": "TJMG Normativos RAG API", "docs": "/docs"}
-
-@app.get("/health")
+# API routes start with /api (except upload and search for legacy reasons)
+@app.get("/api/health")
 async def health_check():
     return {"status": "ok"}
 
@@ -118,6 +117,13 @@ async def search_endpoint(request: SearchRequest):
     except Exception as e:
         logger.error(f"Error processing search request: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# IMPORTANT: Mount the React frontend AFTER all API routes
+frontend_dist_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend", "dist")
+if os.path.exists(frontend_dist_path):
+    app.mount("/", StaticFiles(directory=frontend_dist_path, html=True), name="frontend")
+else:
+    logger.warning(f"Frontend dist folder not found at {frontend_dist_path}. Run 'npm run build' inside src/frontend.")
 
 if __name__ == "__main__":
     import uvicorn
