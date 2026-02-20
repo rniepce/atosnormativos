@@ -1,54 +1,45 @@
 import logging
 import os
 from typing import List
-import torch
-from sentence_transformers import SentenceTransformer
+from openai import AsyncOpenAI
 from src.utils.db import get_db_connection
 from src.backend.models import SearchRequest, SearchResultItem
 
 logger = logging.getLogger(__name__)
 
 # Global model/client caches
-_EMBEDDING_MODEL = None
-_GEMINI_MODEL = None
+_OPENAI_CLIENT = None
+_ANTHROPIC_CLIENT = None
 _AMAZONIA_CLIENT = None
 
-def get_embedding_model():
-    global _EMBEDDING_MODEL
-    if _EMBEDDING_MODEL is None:
-        logger.info("Loading embedding model (BAAI/bge-large-en-v1.5, 1024-dim)...")
+def get_openai_client():
+    global _OPENAI_CLIENT
+    if _OPENAI_CLIENT is None:
         try:
-            _EMBEDDING_MODEL = SentenceTransformer('BAAI/bge-large-en-v1.5', local_files_only=True)
-        except Exception as e:
-            logger.warning(f"Could not load local model, trying online: {e}")
-            _EMBEDDING_MODEL = SentenceTransformer('BAAI/bge-large-en-v1.5')
-    return _EMBEDDING_MODEL
-
-def get_gemini_model():
-    global _GEMINI_MODEL
-    if _GEMINI_MODEL is None:
-        try:
-            import google.generativeai as genai
-            api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+            api_key = os.getenv("OPENAI_API_KEY")
             if api_key:
-                genai.configure(api_key=api_key)
-                # Try different model names (Gemini 2.5 Pro, then 2.0 Flash as fallback)
-                model_names = ['gemini-3-flash-preview', 'gemini-2.5-pro-preview-06-05', 'gemini-2.0-flash', 'gemini-1.5-flash']
-                for model_name in model_names:
-                    try:
-                        _GEMINI_MODEL = genai.GenerativeModel(model_name)
-                        logger.info(f"Gemini model '{model_name}' initialized successfully")
-                        break
-                    except Exception as e:
-                        logger.warning(f"Could not load {model_name}: {e}")
-                        continue
-                if _GEMINI_MODEL is None:
-                    logger.error("No Gemini model could be loaded")
+                _OPENAI_CLIENT = AsyncOpenAI(api_key=api_key)
+                logger.info("OpenAI client initialized successfully")
             else:
-                logger.warning("GEMINI_API_KEY not set, Gemini LLM answers disabled")
+                logger.warning("OPENAI_API_KEY not set, OpenAI embeddings disabled")
         except Exception as e:
-            logger.error(f"Failed to initialize Gemini: {e}")
-    return _GEMINI_MODEL
+            logger.error(f"Failed to initialize OpenAI: {e}")
+    return _OPENAI_CLIENT
+
+def get_anthropic_client():
+    global _ANTHROPIC_CLIENT
+    if _ANTHROPIC_CLIENT is None:
+        try:
+            import anthropic
+            api_key = os.getenv("ANTHROPIC_API_KEY")
+            if api_key:
+                _ANTHROPIC_CLIENT = anthropic.AsyncAnthropic(api_key=api_key)
+                logger.info("Anthropic client initialized successfully")
+            else:
+                logger.warning("ANTHROPIC_API_KEY not set, Anthropic answers disabled")
+        except Exception as e:
+            logger.error(f"Failed to initialize Anthropic: {e}")
+    return _ANTHROPIC_CLIENT
 
 def get_amazonia_client():
     """Initialize the Amazônia IA client (OpenAI-compatible)."""
@@ -70,9 +61,9 @@ def get_amazonia_client():
     return _AMAZONIA_CLIENT
 
 
-def _llm_generate(prompt: str, provider: str = "gemini") -> str:
+async def _llm_generate(prompt: str, provider: str = "anthropic") -> str:
     """
-    Abstraction layer: generate text from either Gemini or Amazônia IA.
+    Abstraction layer: generate text from either Anthropic or Amazônia IA.
     Returns the generated text, or raises on failure.
     """
     if provider == "amazonia":
@@ -90,22 +81,31 @@ def _llm_generate(prompt: str, provider: str = "gemini") -> str:
         )
         return resp.choices[0].message.content.strip()
     else:
-        # Default: Gemini
-        model = get_gemini_model()
-        if model is None:
-            raise RuntimeError("Gemini model not configured (missing GEMINI_API_KEY)")
-        response = model.generate_content(prompt)
-        return response.text.strip()
+        # Default: Anthropic
+        client = get_anthropic_client()
+        if client is None:
+            raise RuntimeError("Anthropic client not configured (missing ANTHROPIC_API_KEY)")
+        
+        response = await client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=2048,
+            temperature=0.4,
+            system="Você é um assistente jurídico inteligente especializado em atos normativos do Tribunal de Justiça de Minas Gerais (TJMG). Mantenha as respostas concisas e altamente baseadas nos dados fornecidos.",
+            messages=[
+                {"role": "user", "content": prompt}
+            ]
+        )
+        return response.content[0].text.strip()
 
 
 class SearchService:
     def __init__(self):
-        self.embedding_model = get_embedding_model()
+        self.openai_client = get_openai_client()
         # Lazy-init both LLM backends (they cache globally)
-        get_gemini_model()
+        get_anthropic_client()
         get_amazonia_client()
 
-    async def rewrite_query(self, original_query: str, provider: str = "gemini") -> str:
+    async def rewrite_query(self, original_query: str, provider: str = "anthropic") -> str:
         """Optionally rewrite query using LLM for better legal search."""
         try:
             prompt = f"""Reescreva a seguinte pergunta do usuário para otimizar a busca em um sistema de atos normativos jurídicos do TJMG.
@@ -115,14 +115,14 @@ Responda APENAS com a query reescrita, sem explicações.
 Query original: {original_query}
 
 Query otimizada:"""
-            rewritten = _llm_generate(prompt, provider)
+            rewritten = await _llm_generate(prompt, provider)
             logger.info(f"Query rewritten ({provider}): '{original_query}' -> '{rewritten}'")
             return rewritten
         except Exception as e:
             logger.warning(f"Query rewrite failed ({provider}): {e}")
             return original_query.strip()
 
-    async def _rerank_with_llm(self, query: str, results: List[SearchResultItem], provider: str = "gemini") -> List[SearchResultItem]:
+    async def _rerank_with_llm(self, query: str, results: List[SearchResultItem], provider: str = "anthropic") -> List[SearchResultItem]:
         """Use LLM to rerank results by relevance to the query."""
         if len(results) <= 3:
             return results
@@ -145,7 +145,7 @@ DOCUMENTOS:
 
 ORDEM DE RELEVÂNCIA (números separados por vírgula):"""
 
-            order_text = _llm_generate(prompt, provider)
+            order_text = await _llm_generate(prompt, provider)
             
             # Parse the order
             order = []
@@ -193,8 +193,16 @@ ORDEM DE RELEVÂNCIA (números separados por vírgula):"""
             logger.info(f"Query: {rewritten_query}")
 
             # Generate embedding
-            embedding = self.embedding_model.encode([rewritten_query])[0]
-            embedding_str = str(embedding.tolist())
+            if self.openai_client is None:
+                raise RuntimeError("OpenAI client not configured (missing OPENAI_API_KEY)")
+            
+            response = await self.openai_client.embeddings.create(
+                input=[rewritten_query],
+                model="text-embedding-3-large",
+                dimensions=1024
+            )
+            embedding = response.data[0].embedding
+            embedding_str = str(embedding)
             
             # Initialize params with vector ($1)
             params = [embedding_str]
@@ -335,7 +343,7 @@ ORDEM DE RELEVÂNCIA (números separados por vírgula):"""
         finally:
             await conn.close()
 
-    async def generate_answer(self, query: str, context: List[SearchResultItem], provider: str = "gemini") -> str:
+    async def generate_answer(self, query: str, context: List[SearchResultItem], provider: str = "anthropic") -> str:
         """Generate answer using the selected LLM based on retrieved context."""
         if not context:
             return "Não encontrei normas relevantes para sua pergunta nos critérios selecionados."
@@ -364,7 +372,7 @@ INSTRUÇÕES:
 
 RESPOSTA:"""
 
-            answer = _llm_generate(prompt, provider)
+            answer = await _llm_generate(prompt, provider)
             
             # Add sources footer
             answer += "\n\n---\n**📚 Fontes consultadas:**\n"
