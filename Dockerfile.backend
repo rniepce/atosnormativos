@@ -2,18 +2,26 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies + Node.js for React build
 RUN apt-get update && apt-get install -y \
     build-essential \
     libpq-dev \
+    curl \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements
+# Copy Python requirements and install
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy source code
+# Copy all source code
 COPY src/ /app/src/
+
+# Build the React frontend
+WORKDIR /app/src/frontend
+RUN npm install && npm run build
+WORKDIR /app
 
 # Environment variables
 ENV PYTHONPATH=/app

@@ -1,5 +1,6 @@
 [build]
-builder = "nixpacks"
+builder = "dockerfile"
+dockerfilePath = "Dockerfile.backend"
 
 [deploy]
-startCommand = "npm --prefix src/frontend run build && uvicorn src.backend.main:app --host 0.0.0.0 --port $PORT"
+healthcheckPath = "/api/health"
