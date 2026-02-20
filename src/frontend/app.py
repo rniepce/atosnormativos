@@ -474,7 +474,7 @@ with st.sidebar:
 
     # LLM section
     st.markdown("### 🤖 Modelo")
-    llm_options = {"Gemini": "gemini", "Amazônia IA": "amazonia"}
+    llm_options = {"Claude 4.6 Sonnet": "anthropic", "Amazônia IA": "amazonia"}
     llm_label = st.selectbox("Provedor LLM", list(llm_options.keys()), index=0, label_visibility="collapsed")
     llm_provider = llm_options[llm_label]
 
