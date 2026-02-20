@@ -17,3 +17,5 @@ python-multipart
 torch
 sentence-transformers
 openai
+anthropic
+google-cloud-aiplatform
