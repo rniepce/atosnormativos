@@ -1,111 +1,69 @@
 import logging
 import os
 from typing import List
-from openai import AsyncOpenAI
+from openai import AzureOpenAI
 from src.utils.db import get_db_connection
 from src.backend.models import SearchRequest, SearchResultItem
 
 logger = logging.getLogger(__name__)
 
-# Global model/client caches
-_OPENAI_CLIENT = None
-_ANTHROPIC_CLIENT = None
-_AMAZONIA_CLIENT = None
+# ── Azure AI Foundry Configuration ──────────────────────────────
+AZURE_API_KEY = os.getenv("AZURE_API_KEY")
+AZURE_ENDPOINT = os.getenv("AZURE_ENDPOINT", "https://conod-sandboxuailab.services.ai.azure.com")
+AZURE_API_VERSION = os.getenv("AZURE_API_VERSION", "2024-12-01-preview")
+AZURE_LLM_MODEL = os.getenv("AZURE_LLM_MODEL", "gpt-5-nano")
+AZURE_EMBEDDING_MODEL = os.getenv("AZURE_EMBEDDING_MODEL", "text-embedding-3-large")
+AZURE_EMBEDDING_DIMENSIONS = int(os.getenv("AZURE_EMBEDDING_DIMENSIONS", "1024"))
 
-def get_openai_client():
-    global _OPENAI_CLIENT
-    if _OPENAI_CLIENT is None:
+# Single Azure OpenAI client for both embeddings + chat
+_AZURE_CLIENT = None
+
+
+def get_azure_client():
+    """Initialize a single Azure OpenAI client for embeddings and LLM."""
+    global _AZURE_CLIENT
+    if _AZURE_CLIENT is None:
+        if not AZURE_API_KEY:
+            logger.warning("AZURE_API_KEY not set, Azure AI disabled")
+            return None
         try:
-            api_key = os.getenv("OPENAI_API_KEY")
-            if api_key:
-                _OPENAI_CLIENT = AsyncOpenAI(api_key=api_key)
-                logger.info("OpenAI client initialized successfully")
-            else:
-                logger.warning("OPENAI_API_KEY not set, OpenAI embeddings disabled")
+            _AZURE_CLIENT = AzureOpenAI(
+                api_key=AZURE_API_KEY,
+                azure_endpoint=AZURE_ENDPOINT,
+                api_version=AZURE_API_VERSION,
+            )
+            logger.info(f"Azure OpenAI client initialized (LLM: {AZURE_LLM_MODEL}, Embeddings: {AZURE_EMBEDDING_MODEL})")
         except Exception as e:
-            logger.error(f"Failed to initialize OpenAI: {e}")
-    return _OPENAI_CLIENT
-
-def get_anthropic_client():
-    global _ANTHROPIC_CLIENT
-    if _ANTHROPIC_CLIENT is None:
-        try:
-            import anthropic
-            api_key = os.getenv("ANTHROPIC_API_KEY")
-            if api_key:
-                _ANTHROPIC_CLIENT = anthropic.AsyncAnthropic(api_key=api_key)
-                logger.info("Anthropic client initialized successfully")
-            else:
-                logger.warning("ANTHROPIC_API_KEY not set, Anthropic answers disabled")
-        except Exception as e:
-            logger.error(f"Failed to initialize Anthropic: {e}")
-    return _ANTHROPIC_CLIENT
-
-def get_amazonia_client():
-    """Initialize the Amazônia IA client (OpenAI-compatible)."""
-    global _AMAZONIA_CLIENT
-    if _AMAZONIA_CLIENT is None:
-        api_key = os.getenv("AMAZONIA_API_KEY")
-        if api_key:
-            try:
-                from openai import OpenAI
-                _AMAZONIA_CLIENT = OpenAI(
-                    api_key=api_key,
-                    base_url="https://amazonia-a.amazoniaia.com.br/v1"
-                )
-                logger.info("Amazônia IA client initialized successfully")
-            except Exception as e:
-                logger.error(f"Failed to initialize Amazônia IA client: {e}")
-        else:
-            logger.warning("AMAZONIA_API_KEY not set, Amazônia IA answers disabled")
-    return _AMAZONIA_CLIENT
+            logger.error(f"Failed to initialize Azure OpenAI client: {e}")
+    return _AZURE_CLIENT
 
 
-async def _llm_generate(prompt: str, provider: str = "anthropic") -> str:
-    """
-    Abstraction layer: generate text from either Anthropic or Amazônia IA.
-    Returns the generated text, or raises on failure.
-    """
-    if provider == "amazonia":
-        client = get_amazonia_client()
-        if client is None:
-            raise RuntimeError("Amazônia IA client not configured (missing AMAZONIA_API_KEY)")
-        resp = client.chat.completions.create(
-            model="rodrigomalossi/amazonia-a",
-            messages=[
-                {"role": "system", "content": "Você é Amazônia-a, um assistente jurídico conciso e prestativo."},
-                {"role": "user", "content": prompt},
-            ],
-            temperature=0.6,
-            top_p=0.9,
-        )
-        return resp.choices[0].message.content.strip()
-    else:
-        # Default: Anthropic
-        client = get_anthropic_client()
-        if client is None:
-            raise RuntimeError("Anthropic client not configured (missing ANTHROPIC_API_KEY)")
-        
-        response = await client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=2048,
-            temperature=0.4,
-            system="Você é um assistente jurídico inteligente especializado em atos normativos do Tribunal de Justiça de Minas Gerais (TJMG). Mantenha as respostas concisas e altamente baseadas nos dados fornecidos.",
-            messages=[
-                {"role": "user", "content": prompt}
-            ]
-        )
-        return response.content[0].text.strip()
+def _llm_generate(prompt: str) -> str:
+    """Generate text using GPT-5 Nano via Azure AI Foundry."""
+    client = get_azure_client()
+    if client is None:
+        raise RuntimeError("Azure OpenAI client not configured (missing AZURE_API_KEY)")
+
+    response = client.chat.completions.create(
+        model=AZURE_LLM_MODEL,
+        messages=[
+            {
+                "role": "system",
+                "content": "Você é um assistente jurídico inteligente especializado em atos normativos do Tribunal de Justiça de Minas Gerais (TJMG). Mantenha as respostas concisas e altamente baseadas nos dados fornecidos."
+            },
+            {"role": "user", "content": prompt}
+        ],
+        max_tokens=2048,
+        temperature=0.4,
+    )
+    return response.choices[0].message.content.strip()
 
 
 class SearchService:
     def __init__(self):
-        self.openai_client = get_openai_client()
-        # Lazy-init both LLM backends (they cache globally)
-        get_anthropic_client()
-        get_amazonia_client()
+        self.client = get_azure_client()
 
-    async def rewrite_query(self, original_query: str, provider: str = "anthropic") -> str:
+    def rewrite_query(self, original_query: str) -> str:
         """Optionally rewrite query using LLM for better legal search."""
         try:
             prompt = f"""Reescreva a seguinte pergunta do usuário para otimizar a busca em um sistema de atos normativos jurídicos do TJMG.
@@ -115,25 +73,24 @@ Responda APENAS com a query reescrita, sem explicações.
 Query original: {original_query}
 
 Query otimizada:"""
-            rewritten = await _llm_generate(prompt, provider)
-            logger.info(f"Query rewritten ({provider}): '{original_query}' -> '{rewritten}'")
+            rewritten = _llm_generate(prompt)
+            logger.info(f"Query rewritten: '{original_query}' -> '{rewritten}'")
             return rewritten
         except Exception as e:
-            logger.warning(f"Query rewrite failed ({provider}): {e}")
+            logger.warning(f"Query rewrite failed: {e}")
             return original_query.strip()
 
-    async def _rerank_with_llm(self, query: str, results: List[SearchResultItem], provider: str = "anthropic") -> List[SearchResultItem]:
+    def _rerank_with_llm(self, query: str, results: List[SearchResultItem]) -> List[SearchResultItem]:
         """Use LLM to rerank results by relevance to the query."""
         if len(results) <= 3:
             return results
-        
+
         try:
-            # Build context for reranking
             docs_text = ""
             for i, item in enumerate(results):
                 status_marker = "✓ VIGENTE" if item.status == "VIGENTE" else "✗ REVOGADO"
                 docs_text += f"\n[{i}] {item.tipo} {item.numero}/{item.ano} ({status_marker})\n{item.chunk_text[:300]}...\n"
-            
+
             prompt = f"""Analise a relevância dos seguintes trechos de atos normativos para a pergunta do usuário.
 Retorne APENAS os números dos documentos mais relevantes, ordenados do mais ao menos relevante, separados por vírgula.
 Considere: (1) relevância semântica, (2) status de vigência (prefira VIGENTE), (3) especificidade.
@@ -145,9 +102,8 @@ DOCUMENTOS:
 
 ORDEM DE RELEVÂNCIA (números separados por vírgula):"""
 
-            order_text = await _llm_generate(prompt, provider)
-            
-            # Parse the order
+            order_text = _llm_generate(prompt)
+
             order = []
             for num in order_text.replace(" ", "").split(","):
                 try:
@@ -156,19 +112,17 @@ ORDEM DE RELEVÂNCIA (números separados por vírgula):"""
                         order.append(idx)
                 except ValueError:
                     continue
-            
-            # Reorder results
+
             if order:
                 reranked = [results[i] for i in order if i < len(results)]
-                # Add any missing results at the end
                 remaining = [r for i, r in enumerate(results) if i not in order]
                 reranked.extend(remaining)
-                logger.info(f"Reranked {len(results)} results ({provider})")
+                logger.info(f"Reranked {len(results)} results")
                 return reranked
-            
+
         except Exception as e:
-            logger.warning(f"Reranking failed ({provider}): {e}")
-        
+            logger.warning(f"Reranking failed: {e}")
+
         return results
 
     def _detect_recency_intent(self, query: str) -> bool:
@@ -179,9 +133,7 @@ ORDEM DE RELEVÂNCIA (números separados por vírgula):"""
 
     async def search(self, request: SearchRequest) -> List[SearchResultItem]:
         conn = await get_db_connection()
-        provider = request.llm_provider
-        
-        # Detect recency intent if not explicitly set
+
         prioritize_recency = request.prioritize_recency
         if not prioritize_recency and self._detect_recency_intent(request.query):
             prioritize_recency = True
@@ -189,33 +141,31 @@ ORDEM DE RELEVÂNCIA (números separados por vírgula):"""
 
         try:
             # Optionally rewrite query for better search
-            rewritten_query = await self.rewrite_query(request.query, provider)
+            rewritten_query = self.rewrite_query(request.query)
             logger.info(f"Query: {rewritten_query}")
 
-            # Generate embedding
-            if self.openai_client is None:
-                raise RuntimeError("OpenAI client not configured (missing OPENAI_API_KEY)")
-            
-            response = await self.openai_client.embeddings.create(
+            # Generate embedding via Azure OpenAI
+            if self.client is None:
+                raise RuntimeError("Azure OpenAI client not configured (missing AZURE_API_KEY)")
+
+            response = self.client.embeddings.create(
                 input=[rewritten_query],
-                model="text-embedding-3-large",
-                dimensions=1024
+                model=AZURE_EMBEDDING_MODEL,
+                dimensions=AZURE_EMBEDDING_DIMENSIONS,
             )
             embedding = response.data[0].embedding
             embedding_str = str(embedding)
-            
+
             # Initialize params with vector ($1)
             params = [embedding_str]
-            
-            # If hybrid search, $2 is the text query. Otherwise $2 is next param.
+
+            # If hybrid search, $2 is the text query
             if request.use_hybrid_search:
                 params.append(rewritten_query)
 
             # Build query with filters
             where_clauses = []
-            where_clauses = []
-            
-            # Helper to add param and get its placeholder index
+
             def add_param(value):
                 params.append(value)
                 return len(params)
@@ -223,11 +173,11 @@ ORDEM DE RELEVÂNCIA (números separados por vírgula):"""
             if request.filter_status:
                 idx = add_param(request.filter_status)
                 where_clauses.append(f"d.status_vigencia = ${idx}")
-            
+
             if request.filter_tipo:
                 idx = add_param(request.filter_tipo)
                 where_clauses.append(f"d.tipo = ${idx}")
-                
+
             if request.filter_ano:
                 idx = add_param(request.filter_ano)
                 where_clauses.append(f"d.ano = ${idx}")
@@ -235,14 +185,10 @@ ORDEM DE RELEVÂNCIA (números separados por vírgula):"""
             where_sql = " AND ".join(where_clauses)
             if where_sql:
                 where_sql = f"AND {where_sql}"
-            
-            # Hybrid search: vector + BM25 keyword
-            # vigente_boost: +0.15 for VIGENTE documents
+
             if request.use_hybrid_search:
-                # Recency boost logic
                 recency_boost_sql = "0"
                 if prioritize_recency:
-                    # +0.25 for 2025, +0.15 for 2024
                     recency_boost_sql = """
                         CASE 
                             WHEN d.ano = 2025 THEN 0.25 
@@ -291,8 +237,6 @@ ORDEM DE RELEVÂNCIA (números separados por vírgula):"""
                     LIMIT 20
                 """
             else:
-                # Simple vector search with vigente boost
-                # Simple vector search with similar logic
                 recency_boost_sql = "0"
                 if prioritize_recency:
                     recency_boost_sql = "CASE WHEN d.ano = 2025 THEN 0.25 WHEN d.ano = 2024 THEN 0.15 ELSE 0 END"
@@ -316,9 +260,9 @@ ORDEM DE RELEVÂNCIA (números separados por vírgula):"""
                     ORDER BY combined_score DESC
                     LIMIT 20
                 """
-            
+
             rows = await conn.fetch(query_sql, *params)
-            
+
             results = []
             for row in rows:
                 results.append(SearchResultItem(
@@ -332,28 +276,26 @@ ORDEM DE RELEVÂNCIA (números separados por vírgula):"""
                     chunk_text=row["conteudo_texto"],
                     score=float(row["combined_score"])
                 ))
-            
+
             # Rerank with LLM if enabled
             if request.use_reranking and len(results) > 3:
-                results = await self._rerank_with_llm(request.query, results, provider)
-            
-            # Return top 10 after reranking
+                results = self._rerank_with_llm(request.query, results)
+
             return results[:10]
-            
+
         finally:
             await conn.close()
 
-    async def generate_answer(self, query: str, context: List[SearchResultItem], provider: str = "anthropic") -> str:
-        """Generate answer using the selected LLM based on retrieved context."""
+    async def generate_answer(self, query: str, context: List[SearchResultItem]) -> str:
+        """Generate answer using GPT-5 Nano via Azure AI Foundry."""
         if not context:
             return "Não encontrei normas relevantes para sua pergunta nos critérios selecionados."
-        
-        # Build context for LLM
+
         context_text = ""
         for i, item in enumerate(context, 1):
             context_text += f"\n--- Documento {i}: {item.tipo} {item.numero}/{item.ano} ({item.filename}) ---\n"
             context_text += f"{item.chunk_text}\n"
-        
+
         try:
             prompt = f"""Você é um assistente jurídico especializado em atos normativos do TJMG (Tribunal de Justiça de Minas Gerais).
 
@@ -372,26 +314,25 @@ INSTRUÇÕES:
 
 RESPOSTA:"""
 
-            answer = await _llm_generate(prompt, provider)
-            
-            # Add sources footer
+            answer = _llm_generate(prompt)
+
             answer += "\n\n---\n**📚 Fontes consultadas:**\n"
             for item in context[:5]:
                 answer += f"- {item.tipo} {item.numero}/{item.ano} ({item.filename})\n"
-            
+
             return answer
-            
+
         except Exception as e:
-            logger.error(f"LLM error ({provider}): {e}", exc_info=True)
+            logger.error(f"LLM error: {e}", exc_info=True)
             return self._fallback_answer(query, context)
-    
+
     def _fallback_answer(self, query: str, context: List[SearchResultItem]) -> str:
         """Fallback when no LLM is available."""
         answer = f"**Resultados encontrados para:** '{query}'\n\n"
         answer += "_(LLM não configurado - exibindo trechos relevantes)_\n\n"
-        
+
         for i, item in enumerate(context, 1):
             answer += f"**{i}. {item.tipo} {item.numero}/{item.ano}** (Relevância: {item.score:.2f})\n"
             answer += f"_{item.chunk_text[:400]}..._\n\n"
-            
+
         return answer

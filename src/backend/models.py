@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import List, Literal, Optional
+from typing import List, Optional
 
 class SearchRequest(BaseModel):
     query: str
@@ -10,7 +10,6 @@ class SearchRequest(BaseModel):
     use_hybrid_search: bool = Field(True, description="Combine vector + keyword search")
     use_reranking: bool = Field(True, description="Use LLM to rerank results")
     prioritize_recency: bool = Field(False, description="Boost recent documents (2024-2025) in ranking")
-    llm_provider: Literal["anthropic", "amazonia"] = Field("anthropic", description="LLM provider to use for answer generation")
 
 class SearchResultItem(BaseModel):
     document_id: int

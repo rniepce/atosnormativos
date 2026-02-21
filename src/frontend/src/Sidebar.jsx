@@ -1,8 +1,6 @@
 import React from 'react';
 
 const Sidebar = ({
-    llmProvider,
-    setLlmProvider,
     filterStatus,
     setFilterStatus,
     filterTipo,
@@ -26,14 +24,13 @@ const Sidebar = ({
 
             <hr />
 
-            {/* Model Section */}
+            {/* Model Info */}
             <h3>🤖 Modelo</h3>
             <div className="form-group">
-                <label>Provedor LLM</label>
-                <select value={llmProvider} onChange={(e) => setLlmProvider(e.target.value)}>
-                    <option value="anthropic">Claude 4.6 Sonnet</option>
-                    <option value="amazonia">Amazônia IA</option>
-                </select>
+                <label>LLM</label>
+                <div style={{ color: 'rgba(255,255,255,0.7)', fontSize: '0.85rem', padding: '0.5rem 0' }}>
+                    GPT-5 Nano <span style={{ opacity: 0.5 }}>(Azure AI Foundry)</span>
+                </div>
             </div>
 
             <hr />

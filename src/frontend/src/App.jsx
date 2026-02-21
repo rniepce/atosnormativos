@@ -9,7 +9,6 @@ function App() {
   const [isLoading, setIsLoading] = useState(false);
 
   // Sidebar states
-  const [llmProvider, setLlmProvider] = useState('anthropic');
   const [filterStatus, setFilterStatus] = useState('');
   const [filterTipo, setFilterTipo] = useState('');
   const [filterAno, setFilterAno] = useState('');
@@ -40,7 +39,6 @@ function App() {
     try {
       const payload = {
         query: userMessage.content,
-        llm_provider: llmProvider,
       };
 
       if (filterStatus) payload.filter_status = filterStatus;
@@ -84,8 +82,6 @@ function App() {
   return (
     <div id="root">
       <Sidebar
-        llmProvider={llmProvider}
-        setLlmProvider={setLlmProvider}
         filterStatus={filterStatus}
         setFilterStatus={setFilterStatus}
         filterTipo={filterTipo}
