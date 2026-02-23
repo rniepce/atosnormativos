@@ -1,7 +1,6 @@
 import logging
 import asyncpg
 import os
-import json
 from typing import Dict, Any, List
 
 logger = logging.getLogger(__name__)
@@ -39,13 +38,6 @@ class DocumentStorage:
                 logger.info(f"Inserted document ID: {doc_id}")
 
                 # 2. Insert Chunks
-                # Prepare data for executemany
-                chunk_data = [
-                    (doc_id, chunk["conteudo_texto"], str(chunk["embedding"])) # pgvector expects string representation for vector? or list? asyncpg+pgvector usually handles list if type map is set. 
-                    # Assuming standard vector string format handling or raw list if driver supports it.
-                    # With asyncpg, it often requires registering the type or passing as string. 
-                    # Let's try passing as native list, if fails we fix. Or safer: string "[1.0, 2.0, ...]"
-                ]
                 
                 # Safer: convert list to string for vector type if not registered
                 formatted_chunks = []

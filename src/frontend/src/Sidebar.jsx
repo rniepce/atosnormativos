@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 
 const Sidebar = ({
     filterStatus,
@@ -7,8 +7,14 @@ const Sidebar = ({
     setFilterTipo,
     filterAno,
     setFilterAno,
+    selectedModel,
+    setSelectedModel,
+    apiKey,
+    setApiKey,
     onClearChat
 }) => {
+    const [showKey, setShowKey] = useState(false);
+
     return (
         <div className="sidebar">
             {/* Logo */}
@@ -24,13 +30,50 @@ const Sidebar = ({
 
             <hr />
 
-            {/* Model Info */}
+            {/* Model & API Key */}
             <h3>🤖 Modelo</h3>
             <div className="form-group">
                 <label>LLM</label>
-                <div style={{ color: 'rgba(255,255,255,0.7)', fontSize: '0.85rem', padding: '0.5rem 0' }}>
-                    GPT-5 Nano <span style={{ opacity: 0.5 }}>(Azure AI Foundry)</span>
+                <select value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)}>
+                    <option value="gpt-4.1-mini">GPT-4.1-mini (rápido)</option>
+                    <option value="gpt-5.2-chat">GPT-5.2 (avançado)</option>
+                </select>
+            </div>
+
+            <div className="form-group">
+                <label>API Key (Azure OpenAI)</label>
+                <div style={{ position: 'relative' }}>
+                    <input
+                        type={showKey ? 'text' : 'password'}
+                        placeholder="Cole sua API Key…"
+                        value={apiKey}
+                        onChange={(e) => setApiKey(e.target.value)}
+                        style={{ paddingRight: '2.5rem' }}
+                    />
+                    <button
+                        type="button"
+                        onClick={() => setShowKey(!showKey)}
+                        style={{
+                            position: 'absolute',
+                            right: '0.5rem',
+                            top: '50%',
+                            transform: 'translateY(-50%)',
+                            background: 'none',
+                            border: 'none',
+                            color: 'rgba(255,255,255,0.5)',
+                            cursor: 'pointer',
+                            fontSize: '0.9rem',
+                            padding: '0.25rem',
+                        }}
+                    >
+                        {showKey ? '🙈' : '👁️'}
+                    </button>
                 </div>
+                {!apiKey && (
+                    <div style={{ color: '#f59e0b', fontSize: '0.75rem', marginTop: '0.3rem' }}>
+                        ⚠️ Insira a API Key para habilitar as buscas
+                    </div>
+                )}
             </div>
 
             <hr />

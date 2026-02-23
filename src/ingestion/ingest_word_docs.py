@@ -42,10 +42,12 @@ MODEL = "text-embedding-3-large"
 
 # ── Database connection ─────────────────────────────────────────
 def get_dsn() -> str:
-    # Using the Railway Database URL provided by the user
-    # postgresql://postgres:pvjPoRKOeQOVmZNCulAVYXqpWmnefbsa@trolley.proxy.rlwy.net:21494/railway
-    # User's pgvector location update: yamanote.proxy.rlwy.net:23504
-    return "postgresql://postgres:pvjPoRKOeQOVmZNCulAVYXqpWmnefbsa@yamanote.proxy.rlwy.net:23504/railway"
+    user = os.getenv("POSTGRES_USER", "postgres")
+    password = os.getenv("POSTGRES_PASSWORD", "")
+    host = os.getenv("POSTGRES_HOST", "localhost")
+    port = os.getenv("POSTGRES_PORT", "5432")
+    db = os.getenv("POSTGRES_DB", "railway")
+    return f"postgresql://{user}:{password}@{host}:{port}/{db}"
 
 # ── DB Initialization ───────────────────────────────────────────
 async def init_db(conn):

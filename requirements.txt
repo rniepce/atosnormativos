@@ -9,7 +9,6 @@ sqlalchemy
 langchain-text-splitters
 pymupdf
 python-dotenv
-asyncio
 pydantic
 pydantic-settings
 requests

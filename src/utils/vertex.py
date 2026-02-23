@@ -4,10 +4,7 @@ import vertexai
 from vertexai.generative_models import GenerativeModel, Part, HarmCategory, HarmBlockThreshold
 from vertexai.language_models import TextEmbeddingInput, TextEmbeddingModel
 
-# Initialize Vertex AI
-# Ideally initialized via environment variables or explicitly passed
-PROJECT_ID = os.getenv("GCP_PROJECT_ID")
-LOCATION = os.getenv("GCP_LOCATION", "southamerica-east1")
+
 
 from google.oauth2 import service_account
 import json

@@ -7,11 +7,11 @@ from src.backend.models import SearchRequest, SearchResultItem
 
 logger = logging.getLogger(__name__)
 
-# ── Azure AI Foundry Configuration ──────────────────────────────
+# ── Azure OpenAI Configuration ──────────────────────────────────
 AZURE_API_KEY = os.getenv("AZURE_API_KEY")
-AZURE_ENDPOINT = os.getenv("AZURE_ENDPOINT", "https://conod-sandboxuailab.services.ai.azure.com")
+AZURE_ENDPOINT = os.getenv("AZURE_ENDPOINT", "https://assistente-web-resource.cognitiveservices.azure.com/")
 AZURE_API_VERSION = os.getenv("AZURE_API_VERSION", "2024-12-01-preview")
-AZURE_LLM_MODEL = os.getenv("AZURE_LLM_MODEL", "gpt-5-nano")
+AZURE_LLM_MODEL = os.getenv("AZURE_LLM_MODEL", "gpt-4.1-mini")
 AZURE_EMBEDDING_MODEL = os.getenv("AZURE_EMBEDDING_MODEL", "text-embedding-3-large")
 AZURE_EMBEDDING_DIMENSIONS = int(os.getenv("AZURE_EMBEDDING_DIMENSIONS", "1024"))
 
@@ -19,16 +19,25 @@ AZURE_EMBEDDING_DIMENSIONS = int(os.getenv("AZURE_EMBEDDING_DIMENSIONS", "1024")
 _AZURE_CLIENT = None
 
 
-def get_azure_client():
-    """Initialize a single Azure OpenAI client for embeddings and LLM."""
+def get_azure_client(api_key: str = None):
+    """Initialize an Azure OpenAI client. Uses per-request key if provided, otherwise env default."""
+    if api_key:
+        # Per-request client (not cached)
+        return AzureOpenAI(
+            api_key=api_key,
+            azure_endpoint=AZURE_ENDPOINT,
+            api_version=AZURE_API_VERSION,
+        )
+
     global _AZURE_CLIENT
     if _AZURE_CLIENT is None:
-        if not AZURE_API_KEY:
+        env_key = AZURE_API_KEY
+        if not env_key:
             logger.warning("AZURE_API_KEY not set, Azure AI disabled")
             return None
         try:
             _AZURE_CLIENT = AzureOpenAI(
-                api_key=AZURE_API_KEY,
+                api_key=env_key,
                 azure_endpoint=AZURE_ENDPOINT,
                 api_version=AZURE_API_VERSION,
             )
@@ -38,14 +47,15 @@ def get_azure_client():
     return _AZURE_CLIENT
 
 
-def _llm_generate(prompt: str) -> str:
-    """Generate text using GPT-5 Nano via Azure AI Foundry."""
-    client = get_azure_client()
+def _llm_generate(prompt: str, model: str = None, api_key: str = None) -> str:
+    """Generate text using Azure OpenAI (model selectable per request)."""
+    client = get_azure_client(api_key)
     if client is None:
-        raise RuntimeError("Azure OpenAI client not configured (missing AZURE_API_KEY)")
+        raise RuntimeError("Azure OpenAI client not configured (missing API Key)")
 
+    use_model = model or AZURE_LLM_MODEL
     response = client.chat.completions.create(
-        model=AZURE_LLM_MODEL,
+        model=use_model,
         messages=[
             {
                 "role": "system",
@@ -53,8 +63,8 @@ def _llm_generate(prompt: str) -> str:
             },
             {"role": "user", "content": prompt}
         ],
-        max_tokens=2048,
-        temperature=0.4,
+        max_completion_tokens=4096,
+        temperature=0.3,
     )
     return response.choices[0].message.content.strip()
 
@@ -63,7 +73,7 @@ class SearchService:
     def __init__(self):
         self.client = get_azure_client()
 
-    def rewrite_query(self, original_query: str) -> str:
+    def rewrite_query(self, original_query: str, model: str = None, api_key: str = None) -> str:
         """Optionally rewrite query using LLM for better legal search."""
         try:
             prompt = f"""Reescreva a seguinte pergunta do usuário para otimizar a busca em um sistema de atos normativos jurídicos do TJMG.
@@ -73,14 +83,14 @@ Responda APENAS com a query reescrita, sem explicações.
 Query original: {original_query}
 
 Query otimizada:"""
-            rewritten = _llm_generate(prompt)
+            rewritten = _llm_generate(prompt, model=model, api_key=api_key)
             logger.info(f"Query rewritten: '{original_query}' -> '{rewritten}'")
             return rewritten
         except Exception as e:
             logger.warning(f"Query rewrite failed: {e}")
             return original_query.strip()
 
-    def _rerank_with_llm(self, query: str, results: List[SearchResultItem]) -> List[SearchResultItem]:
+    def _rerank_with_llm(self, query: str, results: List[SearchResultItem], model: str = None, api_key: str = None) -> List[SearchResultItem]:
         """Use LLM to rerank results by relevance to the query."""
         if len(results) <= 3:
             return results
@@ -102,7 +112,7 @@ DOCUMENTOS:
 
 ORDEM DE RELEVÂNCIA (números separados por vírgula):"""
 
-            order_text = _llm_generate(prompt)
+            order_text = _llm_generate(prompt, model=model, api_key=api_key)
 
             order = []
             for num in order_text.replace(" ", "").split(","):
@@ -141,14 +151,15 @@ ORDEM DE RELEVÂNCIA (números separados por vírgula):"""
 
         try:
             # Optionally rewrite query for better search
-            rewritten_query = self.rewrite_query(request.query)
+            rewritten_query = self.rewrite_query(request.query, model=request.model, api_key=request.api_key)
             logger.info(f"Query: {rewritten_query}")
 
             # Generate embedding via Azure OpenAI
-            if self.client is None:
-                raise RuntimeError("Azure OpenAI client not configured (missing AZURE_API_KEY)")
+            embed_client = get_azure_client(request.api_key) if request.api_key else self.client
+            if embed_client is None:
+                raise RuntimeError("Azure OpenAI client not configured (missing API Key)")
 
-            response = self.client.embeddings.create(
+            response = embed_client.embeddings.create(
                 input=[rewritten_query],
                 model=AZURE_EMBEDDING_MODEL,
                 dimensions=AZURE_EMBEDDING_DIMENSIONS,
@@ -279,15 +290,15 @@ ORDEM DE RELEVÂNCIA (números separados por vírgula):"""
 
             # Rerank with LLM if enabled
             if request.use_reranking and len(results) > 3:
-                results = self._rerank_with_llm(request.query, results)
+                results = self._rerank_with_llm(request.query, results, model=request.model, api_key=request.api_key)
 
             return results[:10]
 
         finally:
             await conn.close()
 
-    async def generate_answer(self, query: str, context: List[SearchResultItem]) -> str:
-        """Generate answer using GPT-5 Nano via Azure AI Foundry."""
+    async def generate_answer(self, query: str, context: List[SearchResultItem], model: str = None, api_key: str = None) -> str:
+        """Generate answer using Azure OpenAI (model selectable)."""
         if not context:
             return "Não encontrei normas relevantes para sua pergunta nos critérios selecionados."
 
@@ -314,7 +325,7 @@ INSTRUÇÕES:
 
 RESPOSTA:"""
 
-            answer = _llm_generate(prompt)
+            answer = _llm_generate(prompt, model=model, api_key=api_key)
 
             answer += "\n\n---\n**📚 Fontes consultadas:**\n"
             for item in context[:5]:

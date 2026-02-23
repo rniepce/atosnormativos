@@ -106,11 +106,11 @@ async def search_endpoint(request: SearchRequest):
         results = await search_service.search(request)
         
         if not results:
-            return SearchResponse(answer="Nenhum atorm normativo encontrado com os critérios fornecidos.", sources=[])
+            return SearchResponse(answer="Nenhum ato normativo encontrado com os critérios fornecidos.", sources=[])
 
         # 2. Answer Generation
         # (Could be parallelized or streamed in future)
-        answer = await search_service.generate_answer(request.query, results)
+        answer = await search_service.generate_answer(request.query, results, model=request.model, api_key=request.api_key)
         
         return SearchResponse(answer=answer, sources=results)
 

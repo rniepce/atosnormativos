@@ -7,4 +7,6 @@ venv/
 pgdata/
 db/backup_tjmg_rag.sql
 *.log
-venv/
+node_modules/
+dist/
+*.pdf
