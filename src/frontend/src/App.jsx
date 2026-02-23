@@ -12,7 +12,6 @@ function App() {
   const [filterTipo, setFilterTipo] = useState('');
   const [filterAno, setFilterAno] = useState('');
   const [selectedModel, setSelectedModel] = useState('gpt-4.1-mini');
-  const [apiKey, setApiKey] = useState('');
 
   const chatEndRef = useRef(null);
 
@@ -43,7 +42,6 @@ function App() {
         model: selectedModel,
       };
 
-      if (apiKey.trim()) payload.api_key = apiKey.trim();
       if (filterStatus) payload.filter_status = filterStatus;
       if (filterTipo) payload.filter_tipo = filterTipo;
       if (filterAno && !isNaN(filterAno)) payload.filter_ano = parseInt(filterAno, 10);
@@ -93,8 +91,6 @@ function App() {
         setFilterAno={setFilterAno}
         selectedModel={selectedModel}
         setSelectedModel={setSelectedModel}
-        apiKey={apiKey}
-        setApiKey={setApiKey}
         onClearChat={clearChat}
       />
 

@@ -110,7 +110,7 @@ async def search_endpoint(request: SearchRequest):
 
         # 2. Answer Generation
         # (Could be parallelized or streamed in future)
-        answer = await search_service.generate_answer(request.query, results, model=request.model, api_key=request.api_key)
+        answer = await search_service.generate_answer(request.query, results, model=request.model)
         
         return SearchResponse(answer=answer, sources=results)
 
