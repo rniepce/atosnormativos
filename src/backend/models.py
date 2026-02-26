@@ -11,6 +11,7 @@ class SearchRequest(BaseModel):
     use_reranking: bool = Field(True, description="Use LLM to rerank results")
     prioritize_recency: bool = Field(False, description="Boost recent documents (2024-2025) in ranking")
     model: Optional[str] = Field(None, description="Azure LLM deployment name (e.g., gpt-4.1-mini, gpt-5.2-chat)")
+    use_enriched_prompt: bool = Field(True, description="Use TJMG-enriched system prompt for better contextual search")
 
 class SearchResultItem(BaseModel):
     document_id: int

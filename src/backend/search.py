@@ -38,7 +38,46 @@ def get_azure_client():
     return _AZURE_CLIENT
 
 
-def _llm_generate(prompt: str, model: str = None) -> str:
+# ── Contexto institucional do TJMG ──────────────────────────────
+TJMG_SYSTEM_PROMPT = """Você é um assistente jurídico especializado nos atos normativos do Tribunal de Justiça do Estado de Minas Gerais (TJMG).
+
+CONTEXTO INSTITUCIONAL:
+O TJMG é o órgão de cúpula do Poder Judiciário estadual de Minas Gerais. Sua estrutura administrativa inclui:
+- Presidência, 1ª Vice-Presidência (Judicial), 2ª Vice-Presidência (Institucional), 3ª Vice-Presidência (Planejamento/EJEF)
+- Corregedoria-Geral de Justiça (CGJ) — supervisiona a 1ª instância
+- Órgão Especial — competência normativa e disciplinar
+- Corte Superior — matérias constitucionais
+- Turmas e Câmaras — julgamento recursal
+- Escola Judicial Desembargador Edésio Fernandes (EJEF)
+- Conselho de Supervisão e Gestão dos Juizados Especiais
+
+HIERARQUIA DOS ATOS NORMATIVOS (do mais ao menos abrangente):
+1. Regimento Interno / Emendas Regimentais — norma base do tribunal
+2. Resoluções (do Órgão Especial / Corte Superior) — força normativa geral
+3. Provimentos (da Corregedoria) — regulamentação de serviços judiciais
+4. Portarias / Portarias Conjuntas — atos administrativos da Presidência e órgãos
+5. Avisos / Ordens de Serviço / Instruções — comunicações e procedimentos internos
+
+VOCABULÁRIO TÉCNICO COMUM:
+- "Recesso forense" = período sem expediente (20/dez a 06/jan)
+- "Plantão judiciário" = atendimento urgente fora do expediente
+- "Comarcas" = divisão territorial da Justiça estadual
+- "CEJUSC" = Centro Judiciário de Solução de Conflitos
+- "NUPEMEC" = Núcleo Permanente de Métodos Consensuais
+- "GMF" = Grupo de Monitoramento e Fiscalização
+- "SEI" = Sistema Eletrônico de Informações
+- "PJe" = Processo Judicial eletrônico
+- "EJEF" = Escola Judicial
+- "DIRGED" = Diretoria de Gestão da Informação Documental
+- "PROJEF" = Programa de qualidade da prestação jurisdicional
+
+Mantenha respostas concisas, técnicas e baseadas nos dados fornecidos. Responda sempre em português brasileiro."""
+
+# Prompt genérico (sem contexto TJMG) para comparação
+GENERIC_SYSTEM_PROMPT = "Você é um assistente jurídico. Responda de forma concisa e baseada nos dados fornecidos. Responda em português brasileiro."
+
+
+def _llm_generate(prompt: str, model: str = None, system_prompt: str = None) -> str:
     """Generate text using Azure OpenAI (model selectable per request)."""
     client = get_azure_client()
     if client is None:
@@ -52,7 +91,7 @@ def _llm_generate(prompt: str, model: str = None) -> str:
         "messages": [
             {
                 "role": "system",
-                "content": "Você é um assistente jurídico inteligente especializado em atos normativos do Tribunal de Justiça de Minas Gerais (TJMG). Mantenha as respostas concisas e altamente baseadas nos dados fornecidos."
+                "content": system_prompt or TJMG_SYSTEM_PROMPT
             },
             {"role": "user", "content": prompt}
         ],
@@ -71,16 +110,33 @@ class SearchService:
     def __init__(self):
         self.client = get_azure_client()
 
-    def rewrite_query(self, original_query: str, model: str = None) -> str:
-        """Optionally rewrite query using LLM for better legal search."""
+    def rewrite_query(self, original_query: str, model: str = None, use_enriched: bool = True) -> str:
+        """Rewrite query with TJMG domain vocabulary for better vector search."""
+        if not use_enriched:
+            return original_query.strip()
         try:
-            prompt = f"""Reescreva a seguinte pergunta do usuário para otimizar a busca em um sistema de atos normativos jurídicos do TJMG.
-Mantenha os termos técnicos jurídicos e adicione sinônimos relevantes.
-Responda APENAS com a query reescrita, sem explicações.
+            prompt = f"""Você receberá uma pergunta de um servidor ou magistrado do TJMG que quer encontrar atos normativos relevantes.
+
+Sua tarefa é EXPANDIR e REFORMULAR a query para maximizar os resultados de busca vetorial no banco de atos normativos do TJMG.
+
+REGRAS:
+1. Mantenha a intenção original da pergunta
+2. Adicione sinônimos e termos técnicos jurídicos do TJMG que ampliem a busca
+3. Expanda siglas (ex: "CEJUSC" → "CEJUSC Centro Judiciário de Solução de Conflitos")
+4. Inclua termos correlatos (ex: "férias" → "férias licença afastamento recesso servidor magistrado")
+5. Inclua os tipos de ato normativo mais prováveis (ex: "Resolução Portaria Provimento")
+6. NÃO adicione explicações — responda APENAS com a query expandida
+7. A query expandida deve ter entre 15 e 50 palavras
+
+EXEMPLOS:
+- "férias" → "férias de magistrado juiz desembargador servidor licença afastamento recesso forense Resolução Portaria"
+- "teletrabalho" → "teletrabalho trabalho remoto home office regime híbrido servidor magistrado produtividade Resolução Portaria"
+- "plantão" → "plantão judiciário noturno recesso habeas corpus urgência Portaria Conjunta Resolução escala"
+- "concurso" → "concurso público remoção promoção seleção vaga magistrado servidor cargo provimento Resolução Edital"
 
 Query original: {original_query}
 
-Query otimizada:"""
+Query expandida:"""
             rewritten = _llm_generate(prompt, model=model)
             logger.info(f"Query rewritten: '{original_query}' -> '{rewritten}'")
             return rewritten
@@ -149,8 +205,11 @@ ORDEM DE RELEVÂNCIA (números separados por vírgula):"""
 
         try:
             # Optionally rewrite query for better search
-            rewritten_query = self.rewrite_query(request.query, model=request.model)
-            logger.info(f"Query: {rewritten_query}")
+            rewritten_query = self.rewrite_query(
+                request.query, model=request.model,
+                use_enriched=request.use_enriched_prompt
+            )
+            logger.info(f"Query (enriched={request.use_enriched_prompt}): {rewritten_query}")
 
             # Generate embedding via Azure OpenAI
             if self.client is None:
@@ -294,7 +353,7 @@ ORDEM DE RELEVÂNCIA (números separados por vírgula):"""
         finally:
             await conn.close()
 
-    async def generate_answer(self, query: str, context: List[SearchResultItem], model: str = None) -> str:
+    async def generate_answer(self, query: str, context: List[SearchResultItem], model: str = None, use_enriched: bool = True) -> str:
         """Generate answer using Azure OpenAI (model selectable)."""
         if not context:
             return "Não encontrei normas relevantes para sua pergunta nos critérios selecionados."
@@ -304,25 +363,29 @@ ORDEM DE RELEVÂNCIA (números separados por vírgula):"""
             context_text += f"\n--- Documento {i}: {item.tipo} {item.numero}/{item.ano} ({item.filename}) ---\n"
             context_text += f"{item.chunk_text}\n"
 
-        try:
-            prompt = f"""Você é um assistente jurídico especializado em atos normativos do TJMG (Tribunal de Justiça de Minas Gerais).
+        sys_prompt = TJMG_SYSTEM_PROMPT if use_enriched else GENERIC_SYSTEM_PROMPT
 
-Com base nos documentos abaixo, responda à pergunta do usuário de forma clara, objetiva e fundamentada, citando os atos normativos relevantes.
+        try:
+            prompt = f"""Com base EXCLUSIVAMENTE nos documentos abaixo, responda à pergunta do usuário.
 
 DOCUMENTOS ENCONTRADOS:
 {context_text}
 
 PERGUNTA DO USUÁRIO: {query}
 
-INSTRUÇÕES:
-- Responda em português brasileiro
-- Cite os números e anos das portarias/resoluções quando relevante
-- Se não houver informação suficiente, indique isso claramente
-- Seja conciso mas completo
+INSTRUÇÕES PARA A RESPOSTA:
+1. Cite SEMPRE o tipo, número e ano dos atos normativos relevantes (ex: "Resolução nº 973/2021")
+2. Se um ato revogou ou alterou outro, explique a cadeia normativa
+3. Diferencie entre atos VIGENTES e REVOGADOS — priorize os vigentes
+4. Indique o órgão emissor quando relevante (Presidência, Corregedoria, Órgão Especial)
+5. Se a pergunta não puder ser respondida com os documentos encontrados, diga claramente e sugira termos de busca alternativos
+6. Responda em português brasileiro, de forma clara e objetiva
+7. Use formatação Markdown para melhor legibilidade (negritos, listas)
+8. Ao final, se houver atos que complementem o tema, sugira ao usuário buscar por eles
 
 RESPOSTA:"""
 
-            answer = _llm_generate(prompt, model=model)
+            answer = _llm_generate(prompt, model=model, system_prompt=sys_prompt)
 
             answer += "\n\n---\n**📚 Fontes consultadas:**\n"
             for item in context[:5]:

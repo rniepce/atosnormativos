@@ -9,8 +9,22 @@ const Sidebar = ({
     setFilterAno,
     selectedModel,
     setSelectedModel,
-    onClearChat
+    useEnrichedPrompt,
+    setUseEnrichedPrompt,
+    onClearChat,
+    onUploadFile,
+    isUploading,
 }) => {
+    const fileInputRef = React.useRef(null);
+
+    const handleFileSelect = async (e) => {
+        const file = e.target.files[0];
+        if (file) {
+            await onUploadFile(file);
+            e.target.value = ''; // Reset input
+        }
+    };
+
     return (
         <div className="sidebar">
             {/* Logo */}
@@ -36,6 +50,24 @@ const Sidebar = ({
                 </select>
             </div>
 
+            {/* Enriched Prompt Toggle */}
+            <div className="form-group">
+                <label className="toggle-label">
+                    <span>Prompt Enriquecido</span>
+                    <div
+                        className={`toggle-switch ${useEnrichedPrompt ? 'active' : ''}`}
+                        onClick={() => setUseEnrichedPrompt(!useEnrichedPrompt)}
+                    >
+                        <div className="toggle-thumb" />
+                    </div>
+                </label>
+                <span className="toggle-hint">
+                    {useEnrichedPrompt
+                        ? '✅ Contexto TJMG ativo — expansão de query + persona institucional'
+                        : '⚡ Modo direto — query literal sem expansão'}
+                </span>
+            </div>
+
             <hr />
 
             {/* Filters Section */}
@@ -54,10 +86,12 @@ const Sidebar = ({
                 <select value={filterTipo} onChange={(e) => setFilterTipo(e.target.value)}>
                     <option value="">Todos</option>
                     <option value="Portaria">Portaria</option>
+                    <option value="Portaria Conjunta">Portaria Conjunta</option>
                     <option value="Resolução">Resolução</option>
-                    <option value="Provimento">Provimento</option>
-                    <option value="Recomendação">Recomendação</option>
-                    <option value="Instrução Normativa">Instrução Normativa</option>
+                    <option value="Provimento Conjunto">Provimento</option>
+                    <option value="Aviso">Aviso</option>
+                    <option value="Ordem de Serviço">Ordem de Serviço</option>
+                    <option value="Emenda Regimental">Emenda Regimental</option>
                 </select>
             </div>
 
@@ -74,9 +108,30 @@ const Sidebar = ({
             <hr />
 
             {/* Action Buttons */}
-            <button className="btn-clear" onClick={onClearChat}>
-                🗑️ Limpar Conversa
+            <button className="btn-primary" onClick={onClearChat}>
+                ✨ Novo Chat
             </button>
+
+            <button
+                className="btn-upload"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isUploading}
+            >
+                {isUploading ? (
+                    <>
+                        <div className="spinner small" /> Processando...
+                    </>
+                ) : (
+                    '📄 Subir Ato Normativo'
+                )}
+            </button>
+            <input
+                ref={fileInputRef}
+                type="file"
+                accept=".pdf,.doc,.docx"
+                style={{ display: 'none' }}
+                onChange={handleFileSelect}
+            />
 
             {/* Footer */}
             <div className="sidebar-footer">
