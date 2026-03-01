@@ -7,6 +7,7 @@ function App() {
   const [prompt, setPrompt] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // Sidebar states
   const [filterStatus, setFilterStatus] = useState('');
@@ -136,7 +137,24 @@ function App() {
   };
 
   return (
-    <div id="root">
+    <>
+      {/* Hamburger button — visible only on mobile via CSS */}
+      <button
+        className={`hamburger-btn ${sidebarOpen ? 'active' : ''}`}
+        onClick={() => setSidebarOpen(!sidebarOpen)}
+        aria-label="Menu"
+      >
+        <span />
+        <span />
+        <span />
+      </button>
+
+      {/* Overlay behind sidebar on mobile */}
+      <div
+        className={`sidebar-overlay ${sidebarOpen ? 'visible' : ''}`}
+        onClick={() => setSidebarOpen(false)}
+      />
+
       <Sidebar
         filterStatus={filterStatus}
         setFilterStatus={setFilterStatus}
@@ -151,6 +169,8 @@ function App() {
         onClearChat={clearChat}
         onUploadFile={handleUploadFile}
         isUploading={isUploading}
+        isOpen={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
       />
 
       <main className="main-content">
@@ -211,7 +231,7 @@ function App() {
           </div>
         </div>
       </main>
-    </div>
+    </>
   );
 }
 

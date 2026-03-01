@@ -14,6 +14,8 @@ const Sidebar = ({
     onClearChat,
     onUploadFile,
     isUploading,
+    isOpen,
+    onClose,
 }) => {
     const fileInputRef = React.useRef(null);
 
@@ -25,8 +27,13 @@ const Sidebar = ({
         }
     };
 
+    const handleClearChat = () => {
+        onClearChat();
+        onClose();
+    };
+
     return (
-        <div className="sidebar">
+        <div className={`sidebar ${isOpen ? 'open' : ''}`}>
             {/* Logo */}
             <div className="sidebar-logo">
                 <svg width="60" height="55" viewBox="0 0 120 110" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -108,7 +115,7 @@ const Sidebar = ({
             <hr />
 
             {/* Action Buttons */}
-            <button className="btn-primary" onClick={onClearChat}>
+            <button className="btn-primary" onClick={handleClearChat}>
                 ✨ Novo Chat
             </button>
 
