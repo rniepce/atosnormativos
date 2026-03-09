@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 
 const Sidebar = ({
     filterStatus,
@@ -7,8 +7,32 @@ const Sidebar = ({
     setFilterTipo,
     filterAno,
     setFilterAno,
+    googleApiKey,
+    setGoogleApiKey,
     onClearChat
 }) => {
+    const [modelInfo, setModelInfo] = useState({ label: 'Carregando...', provider: '' });
+    const [showKey, setShowKey] = useState(false);
+
+    const backendUrl = import.meta.env.PROD ? window.location.origin : (import.meta.env.VITE_BACKEND_URL || "http://localhost:8080");
+
+    useEffect(() => {
+        fetch(`${backendUrl}/api/model-info`)
+            .then(res => res.json())
+            .then(data => setModelInfo(data))
+            .catch(() => setModelInfo({ label: 'Indisponível', provider: 'none' }));
+    }, [backendUrl]);
+
+    const providerBadge = modelInfo.provider === 'ollama'
+        ? { text: 'LOCAL', color: '#00B894' }
+        : modelInfo.provider === 'google'
+            ? { text: 'GOOGLE AI', color: '#4285F4' }
+            : modelInfo.provider === 'azure'
+                ? { text: 'CLOUD', color: '#0984E3' }
+                : { text: '—', color: '#636E72' };
+
+    const hasKey = googleApiKey && googleApiKey.trim().length > 0;
+
     return (
         <div className="sidebar">
             {/* Logo */}
@@ -28,10 +52,57 @@ const Sidebar = ({
             <h3>🤖 Modelo</h3>
             <div className="form-group">
                 <label>LLM</label>
-                <div style={{ color: 'rgba(255,255,255,0.7)', fontSize: '0.85rem', padding: '0.5rem 0' }}>
-                    GPT-5 Nano <span style={{ opacity: 0.5 }}>(Azure AI Foundry)</span>
+                <div style={{ color: 'rgba(255,255,255,0.85)', fontSize: '0.85rem', padding: '0.5rem 0', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    {modelInfo.label}
+                    <span style={{
+                        background: hasKey || modelInfo.provider !== 'google' ? providerBadge.color : '#636E72',
+                        color: '#fff',
+                        fontSize: '0.6rem',
+                        padding: '2px 8px',
+                        borderRadius: '10px',
+                        fontWeight: 600,
+                        letterSpacing: '0.05em',
+                    }}>
+                        {hasKey || modelInfo.provider !== 'google' ? providerBadge.text : 'SEM CHAVE'}
+                    </span>
                 </div>
             </div>
+
+            {modelInfo.provider === 'google' && (
+                <div className="form-group">
+                    <label>🔑 Google API Key</label>
+                    <div style={{ position: 'relative' }}>
+                        <input
+                            type={showKey ? 'text' : 'password'}
+                            placeholder="Cole sua chave aqui..."
+                            value={googleApiKey}
+                            onChange={(e) => setGoogleApiKey(e.target.value)}
+                            style={{ paddingRight: '2.5rem' }}
+                        />
+                        <button
+                            type="button"
+                            onClick={() => setShowKey(!showKey)}
+                            style={{
+                                position: 'absolute',
+                                right: '6px',
+                                top: '50%',
+                                transform: 'translateY(-50%)',
+                                background: 'none',
+                                border: 'none',
+                                color: 'rgba(255,255,255,0.5)',
+                                cursor: 'pointer',
+                                fontSize: '0.8rem',
+                                padding: '4px',
+                            }}
+                        >
+                            {showKey ? '🙈' : '👁️'}
+                        </button>
+                    </div>
+                    <div style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.4)', marginTop: '0.2rem' }}>
+                        Grátis em <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" style={{ color: '#4285F4' }}>aistudio.google.com</a>
+                    </div>
+                </div>
+            )}
 
             <hr />
 

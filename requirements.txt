@@ -15,4 +15,5 @@ pydantic-settings
 requests
 python-multipart
 openai
+httpx
 google-cloud-aiplatform

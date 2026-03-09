@@ -12,6 +12,9 @@ function App() {
   const [filterStatus, setFilterStatus] = useState('');
   const [filterTipo, setFilterTipo] = useState('');
   const [filterAno, setFilterAno] = useState('');
+  const [googleApiKey, setGoogleApiKey] = useState(() => {
+    try { return localStorage.getItem('google_api_key') || ''; } catch { return ''; }
+  });
 
   const chatEndRef = useRef(null);
 
@@ -19,6 +22,11 @@ function App() {
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // Persist Google API key to localStorage
+  useEffect(() => {
+    try { localStorage.setItem('google_api_key', googleApiKey); } catch { }
+  }, [googleApiKey]);
 
   // In production, the backend and frontend are hosted on the same origin
   const backendUrl = import.meta.env.PROD ? window.location.origin : (import.meta.env.VITE_BACKEND_URL || "http://localhost:8080");
@@ -44,6 +52,7 @@ function App() {
       if (filterStatus) payload.filter_status = filterStatus;
       if (filterTipo) payload.filter_tipo = filterTipo;
       if (filterAno && !isNaN(filterAno)) payload.filter_ano = parseInt(filterAno, 10);
+      if (googleApiKey.trim()) payload.google_api_key = googleApiKey.trim();
 
       const response = await fetch(`${backendUrl}/search`, {
         method: 'POST',
@@ -88,6 +97,8 @@ function App() {
         setFilterTipo={setFilterTipo}
         filterAno={filterAno}
         setFilterAno={setFilterAno}
+        googleApiKey={googleApiKey}
+        setGoogleApiKey={setGoogleApiKey}
         onClearChat={clearChat}
       />
 

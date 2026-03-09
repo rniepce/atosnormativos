@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from src.backend.models import SearchRequest, SearchResponse
-from src.backend.search import SearchService
+from src.backend.search import SearchService, get_active_llm_info, set_request_google_key, clear_request_google_key
 from src.ingestion.extraction import extract_text_from_pdf
 from src.ingestion.classification import DocumentClassifier
 from src.ingestion.chunking import LegalTextSplitter
@@ -38,6 +38,11 @@ search_service = SearchService()
 @app.get("/api/health")
 async def health_check():
     return {"status": "ok"}
+
+@app.get("/api/model-info")
+async def model_info():
+    """Return the active LLM provider and model name."""
+    return get_active_llm_info()
 
 @app.post("/upload")
 async def upload_pdf(file: UploadFile = File(...)):
@@ -102,17 +107,24 @@ async def search_endpoint(request: SearchRequest):
     try:
         logger.info(f"Received search request: {request.query}")
         
-        # 1. Search Logic
-        results = await search_service.search(request)
+        # Set per-request Google API key if provided by frontend
+        if request.google_api_key:
+            set_request_google_key(request.google_api_key)
         
-        if not results:
-            return SearchResponse(answer="Nenhum atorm normativo encontrado com os critérios fornecidos.", sources=[])
+        try:
+            # 1. Search Logic
+            results = await search_service.search(request)
+            
+            if not results:
+                return SearchResponse(answer="Nenhum ato normativo encontrado com os critérios fornecidos.", sources=[])
 
-        # 2. Answer Generation
-        # (Could be parallelized or streamed in future)
-        answer = await search_service.generate_answer(request.query, results)
-        
-        return SearchResponse(answer=answer, sources=results)
+            # 2. Answer Generation
+            answer = await search_service.generate_answer(request.query, results)
+            
+            return SearchResponse(answer=answer, sources=results)
+        finally:
+            # Always clear the per-request key
+            clear_request_google_key()
 
     except Exception as e:
         logger.error(f"Error processing search request: {e}")

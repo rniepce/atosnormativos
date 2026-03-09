@@ -1,11 +1,24 @@
 import logging
 import os
 from typing import List
-from openai import AzureOpenAI
+import httpx
+from openai import AzureOpenAI, OpenAI
 from src.utils.db import get_db_connection
 from src.backend.models import SearchRequest, SearchResultItem
 
 logger = logging.getLogger(__name__)
+
+# ── LLM Provider Configuration ──────────────────────────────────
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "google")  # "google", "ollama", or "azure"
+
+# ── Ollama (Local) Configuration ────────────────────────────────
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "gemma3:12b")
+
+# ── Google AI Studio (Gemini API) Configuration ─────────────────
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+GOOGLE_MODEL = os.getenv("GOOGLE_MODEL", "gemma-3-12b-it")
+GOOGLE_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 
 # ── Azure AI Foundry Configuration ──────────────────────────────
 AZURE_API_KEY = os.getenv("AZURE_API_KEY")
@@ -15,8 +28,23 @@ AZURE_LLM_MODEL = os.getenv("AZURE_LLM_MODEL", "gpt-5-nano")
 AZURE_EMBEDDING_MODEL = os.getenv("AZURE_EMBEDDING_MODEL", "text-embedding-3-large")
 AZURE_EMBEDDING_DIMENSIONS = int(os.getenv("AZURE_EMBEDDING_DIMENSIONS", "1024"))
 
-# Single Azure OpenAI client for both embeddings + chat
+# Cached clients
 _AZURE_CLIENT = None
+_GOOGLE_CLIENT = None
+_OLLAMA_AVAILABLE = None
+_REQUEST_GOOGLE_KEY = None  # Per-request API key from frontend
+
+
+def set_request_google_key(key: str):
+    """Set a per-request Google API key (from frontend)."""
+    global _REQUEST_GOOGLE_KEY
+    _REQUEST_GOOGLE_KEY = key
+
+
+def clear_request_google_key():
+    """Clear the per-request Google API key."""
+    global _REQUEST_GOOGLE_KEY
+    _REQUEST_GOOGLE_KEY = None
 
 
 def get_azure_client():
@@ -38,25 +66,173 @@ def get_azure_client():
     return _AZURE_CLIENT
 
 
-def _llm_generate(prompt: str) -> str:
-    """Generate text using GPT-5 Nano via Azure AI Foundry."""
-    client = get_azure_client()
+def get_google_client():
+    """Initialize Google AI Studio client. Prefers per-request key from frontend."""
+    global _GOOGLE_CLIENT
+    # If a per-request key is provided, create a temporary client
+    if _REQUEST_GOOGLE_KEY:
+        return OpenAI(
+            api_key=_REQUEST_GOOGLE_KEY,
+            base_url=GOOGLE_BASE_URL,
+        )
+    # Otherwise use the cached env-var client
+    if _GOOGLE_CLIENT is None:
+        if not GOOGLE_API_KEY:
+            logger.warning("GOOGLE_API_KEY not set, Google AI Studio disabled")
+            return None
+        try:
+            _GOOGLE_CLIENT = OpenAI(
+                api_key=GOOGLE_API_KEY,
+                base_url=GOOGLE_BASE_URL,
+            )
+            logger.info(f"✅ Google AI Studio client initialized (Model: {GOOGLE_MODEL})")
+        except Exception as e:
+            logger.error(f"Failed to initialize Google AI Studio client: {e}")
+    return _GOOGLE_CLIENT
+
+
+def check_ollama_available() -> bool:
+    """Check if Ollama is running and the model is available."""
+    global _OLLAMA_AVAILABLE
+    if _OLLAMA_AVAILABLE is not None:
+        return _OLLAMA_AVAILABLE
+    try:
+        resp = httpx.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=3.0)
+        if resp.status_code == 200:
+            models = [m.get("name", "") for m in resp.json().get("models", [])]
+            model_base = OLLAMA_MODEL.split(":")[0]
+            _OLLAMA_AVAILABLE = any(model_base in m for m in models)
+            if _OLLAMA_AVAILABLE:
+                logger.info(f"✅ Ollama available with model: {OLLAMA_MODEL}")
+            else:
+                logger.warning(f"⚠️ Ollama running but model '{OLLAMA_MODEL}' not found. Available: {models}")
+            return _OLLAMA_AVAILABLE
+    except Exception as e:
+        logger.warning(f"⚠️ Ollama not reachable at {OLLAMA_BASE_URL}: {e}")
+    _OLLAMA_AVAILABLE = False
+    return False
+
+
+def get_active_llm_info() -> dict:
+    """Return info about the currently active LLM provider and model."""
+    if LLM_PROVIDER == "google" and (GOOGLE_API_KEY or _REQUEST_GOOGLE_KEY):
+        return {"provider": "google", "model": GOOGLE_MODEL, "label": f"Gemma 3 12B (Google AI)"}
+    elif LLM_PROVIDER == "google" and not GOOGLE_API_KEY:
+        return {"provider": "google", "model": GOOGLE_MODEL, "label": f"Gemma 3 12B (chave necessária)", "needs_key": True}
+    elif LLM_PROVIDER == "ollama" and check_ollama_available():
+        return {"provider": "ollama", "model": OLLAMA_MODEL, "label": f"Gemma 3 12B (Local)"}
+    elif get_azure_client() is not None:
+        return {"provider": "azure", "model": AZURE_LLM_MODEL, "label": f"{AZURE_LLM_MODEL} (Azure AI)"}
+    else:
+        return {"provider": "none", "model": "none", "label": "Nenhum LLM configurado"}
+
+
+def _ollama_generate(prompt: str, system_prompt: str = None) -> str:
+    """Generate text using Ollama (local Gemma 3 12B)."""
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": prompt})
+
+    try:
+        resp = httpx.post(
+            f"{OLLAMA_BASE_URL}/api/chat",
+            json={
+                "model": OLLAMA_MODEL,
+                "messages": messages,
+                "stream": False,
+                "options": {
+                    "temperature": 0.4,
+                    "num_predict": 2048,
+                }
+            },
+            timeout=120.0,  # Generous timeout for local inference
+        )
+        resp.raise_for_status()
+        return resp.json()["message"]["content"].strip()
+    except httpx.TimeoutException:
+        raise RuntimeError(f"Ollama timeout — model '{OLLAMA_MODEL}' may be loading or too slow")
+    except Exception as e:
+        raise RuntimeError(f"Ollama error: {e}")
+
+
+def _google_generate(prompt: str, system_prompt: str = None) -> str:
+    """Generate text using Google AI Studio (Gemini API with OpenAI compatibility)."""
+    client = get_google_client()
     if client is None:
-        raise RuntimeError("Azure OpenAI client not configured (missing AZURE_API_KEY)")
+        raise RuntimeError("Google AI Studio client not configured (missing GOOGLE_API_KEY)")
+
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": prompt})
 
     response = client.chat.completions.create(
-        model=AZURE_LLM_MODEL,
-        messages=[
-            {
-                "role": "system",
-                "content": "Você é um assistente jurídico inteligente especializado em atos normativos do Tribunal de Justiça de Minas Gerais (TJMG). Mantenha as respostas concisas e altamente baseadas nos dados fornecidos."
-            },
-            {"role": "user", "content": prompt}
-        ],
+        model=GOOGLE_MODEL,
+        messages=messages,
         max_tokens=2048,
         temperature=0.4,
     )
     return response.choices[0].message.content.strip()
+
+
+def _azure_generate(prompt: str, system_prompt: str = None) -> str:
+    """Generate text using Azure OpenAI."""
+    client = get_azure_client()
+    if client is None:
+        raise RuntimeError("Azure OpenAI client not configured (missing AZURE_API_KEY)")
+
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": prompt})
+
+    response = client.chat.completions.create(
+        model=AZURE_LLM_MODEL,
+        messages=messages,
+        max_tokens=2048,
+        temperature=0.4,
+    )
+    return response.choices[0].message.content.strip()
+
+
+SYSTEM_PROMPT = "Você é um assistente jurídico inteligente especializado em atos normativos do Tribunal de Justiça de Minas Gerais (TJMG). Mantenha as respostas concisas e altamente baseadas nos dados fornecidos."
+
+
+def _llm_generate(prompt: str) -> str:
+    """Route LLM generation to the configured provider with automatic fallback.
+    
+    Fallback chain: google → ollama → azure (or your primary first)
+    """
+    providers = {
+        "google": (lambda: get_google_client() is not None, _google_generate, "Google AI Studio"),
+        "ollama": (lambda: check_ollama_available(), _ollama_generate, "Ollama"),
+        "azure": (lambda: get_azure_client() is not None, _azure_generate, "Azure"),
+    }
+
+    if LLM_PROVIDER not in providers:
+        raise RuntimeError(f"Unknown LLM_PROVIDER: {LLM_PROVIDER}")
+
+    # Try primary provider first
+    check_fn, gen_fn, name = providers[LLM_PROVIDER]
+    if check_fn():
+        try:
+            return gen_fn(prompt, system_prompt=SYSTEM_PROMPT)
+        except Exception as e:
+            logger.warning(f"{name} failed: {e}")
+
+    # Try fallbacks in order
+    for fallback_key, (check_fn, gen_fn, name) in providers.items():
+        if fallback_key == LLM_PROVIDER:
+            continue
+        if check_fn():
+            try:
+                logger.info(f"Falling back to {name}")
+                return gen_fn(prompt, system_prompt=SYSTEM_PROMPT)
+            except Exception as e:
+                logger.warning(f"{name} fallback also failed: {e}")
+
+    raise RuntimeError("No LLM available (all providers failed)")
 
 
 class SearchService:
@@ -144,9 +320,9 @@ ORDEM DE RELEVÂNCIA (números separados por vírgula):"""
             rewritten_query = self.rewrite_query(request.query)
             logger.info(f"Query: {rewritten_query}")
 
-            # Generate embedding via Azure OpenAI
+            # Generate embedding via Azure OpenAI (embeddings always use Azure)
             if self.client is None:
-                raise RuntimeError("Azure OpenAI client not configured (missing AZURE_API_KEY)")
+                raise RuntimeError("Azure OpenAI client not configured (missing AZURE_API_KEY) — needed for embeddings")
 
             response = self.client.embeddings.create(
                 input=[rewritten_query],
@@ -287,7 +463,7 @@ ORDEM DE RELEVÂNCIA (números separados por vírgula):"""
             await conn.close()
 
     async def generate_answer(self, query: str, context: List[SearchResultItem]) -> str:
-        """Generate answer using GPT-5 Nano via Azure AI Foundry."""
+        """Generate answer using the active LLM provider."""
         if not context:
             return "Não encontrei normas relevantes para sua pergunta nos critérios selecionados."
 
@@ -329,7 +505,7 @@ RESPOSTA:"""
     def _fallback_answer(self, query: str, context: List[SearchResultItem]) -> str:
         """Fallback when no LLM is available."""
         answer = f"**Resultados encontrados para:** '{query}'\n\n"
-        answer += "_(LLM não configurado - exibindo trechos relevantes)_\n\n"
+        answer += "_(LLM não disponível — exibindo trechos relevantes)_\n\n"
 
         for i, item in enumerate(context, 1):
             answer += f"**{i}. {item.tipo} {item.numero}/{item.ano}** (Relevância: {item.score:.2f})\n"
