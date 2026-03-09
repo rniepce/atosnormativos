@@ -22,9 +22,9 @@ GOOGLE_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 
 # ── Azure AI Foundry Configuration ──────────────────────────────
 AZURE_API_KEY = os.getenv("AZURE_API_KEY")
-AZURE_ENDPOINT = os.getenv("AZURE_ENDPOINT", "https://conod-sandboxuailab.services.ai.azure.com")
-AZURE_API_VERSION = os.getenv("AZURE_API_VERSION", "2024-12-01-preview")
-AZURE_LLM_MODEL = os.getenv("AZURE_LLM_MODEL", "gpt-5-nano")
+AZURE_ENDPOINT = os.getenv("AZURE_ENDPOINT", "https://assistente-web-resource.cognitiveservices.azure.com/")
+AZURE_API_VERSION = os.getenv("AZURE_API_VERSION", "2025-01-01-preview")
+AZURE_LLM_MODEL = os.getenv("AZURE_LLM_MODEL", "gpt-4.1-mini")
 AZURE_EMBEDDING_MODEL = os.getenv("AZURE_EMBEDDING_MODEL", "text-embedding-3-large")
 AZURE_EMBEDDING_DIMENSIONS = int(os.getenv("AZURE_EMBEDDING_DIMENSIONS", "1024"))
 
@@ -48,7 +48,7 @@ def clear_request_google_key():
 
 
 def get_azure_client():
-    """Initialize a single Azure OpenAI client for embeddings and LLM."""
+    """Initialize a single Azure OpenAI client from environment variables."""
     global _AZURE_CLIENT
     if _AZURE_CLIENT is None:
         if not AZURE_API_KEY:
@@ -239,24 +239,41 @@ class SearchService:
     def __init__(self):
         self.client = get_azure_client()
 
-    def rewrite_query(self, original_query: str) -> str:
-        """Optionally rewrite query using LLM for better legal search."""
+    def rewrite_query(self, original_query: str, model: str = None, use_enriched: bool = True) -> str:
+        """Rewrite query with TJMG domain vocabulary for better vector search."""
+        if not use_enriched:
+            return original_query.strip()
         try:
-            prompt = f"""Reescreva a seguinte pergunta do usuário para otimizar a busca em um sistema de atos normativos jurídicos do TJMG.
-Mantenha os termos técnicos jurídicos e adicione sinônimos relevantes.
-Responda APENAS com a query reescrita, sem explicações.
+            prompt = f"""Você receberá uma pergunta de um servidor ou magistrado do TJMG que quer encontrar atos normativos relevantes.
+
+Sua tarefa é EXPANDIR e REFORMULAR a query para maximizar os resultados de busca vetorial no banco de atos normativos do TJMG.
+
+REGRAS:
+1. Mantenha a intenção original da pergunta
+2. Adicione sinônimos e termos técnicos jurídicos do TJMG que ampliem a busca
+3. Expanda siglas (ex: "CEJUSC" → "CEJUSC Centro Judiciário de Solução de Conflitos")
+4. Inclua termos correlatos (ex: "férias" → "férias licença afastamento recesso servidor magistrado")
+5. Inclua os tipos de ato normativo mais prováveis (ex: "Resolução Portaria Provimento")
+6. NÃO adicione explicações — responda APENAS com a query expandida
+7. A query expandida deve ter entre 15 e 50 palavras
+
+EXEMPLOS:
+- "férias" → "férias de magistrado juiz desembargador servidor licença afastamento recesso forense Resolução Portaria"
+- "teletrabalho" → "teletrabalho trabalho remoto home office regime híbrido servidor magistrado produtividade Resolução Portaria"
+- "plantão" → "plantão judiciário noturno recesso habeas corpus urgência Portaria Conjunta Resolução escala"
+- "concurso" → "concurso público remoção promoção seleção vaga magistrado servidor cargo provimento Resolução Edital"
 
 Query original: {original_query}
 
-Query otimizada:"""
-            rewritten = _llm_generate(prompt)
+Query expandida:"""
+            rewritten = _llm_generate(prompt, model=model)
             logger.info(f"Query rewritten: '{original_query}' -> '{rewritten}'")
             return rewritten
         except Exception as e:
             logger.warning(f"Query rewrite failed: {e}")
             return original_query.strip()
 
-    def _rerank_with_llm(self, query: str, results: List[SearchResultItem]) -> List[SearchResultItem]:
+    def _rerank_with_llm(self, query: str, results: List[SearchResultItem], model: str = None) -> List[SearchResultItem]:
         """Use LLM to rerank results by relevance to the query."""
         if len(results) <= 3:
             return results
@@ -278,7 +295,7 @@ DOCUMENTOS:
 
 ORDEM DE RELEVÂNCIA (números separados por vírgula):"""
 
-            order_text = _llm_generate(prompt)
+            order_text = _llm_generate(prompt, model=model)
 
             order = []
             for num in order_text.replace(" ", "").split(","):
@@ -317,8 +334,11 @@ ORDEM DE RELEVÂNCIA (números separados por vírgula):"""
 
         try:
             # Optionally rewrite query for better search
-            rewritten_query = self.rewrite_query(request.query)
-            logger.info(f"Query: {rewritten_query}")
+            rewritten_query = self.rewrite_query(
+                request.query, model=request.model,
+                use_enriched=request.use_enriched_prompt
+            )
+            logger.info(f"Query (enriched={request.use_enriched_prompt}): {rewritten_query}")
 
             # Generate embedding via Azure OpenAI (embeddings always use Azure)
             if self.client is None:
@@ -455,7 +475,7 @@ ORDEM DE RELEVÂNCIA (números separados por vírgula):"""
 
             # Rerank with LLM if enabled
             if request.use_reranking and len(results) > 3:
-                results = self._rerank_with_llm(request.query, results)
+                results = self._rerank_with_llm(request.query, results, model=request.model)
 
             return results[:10]
 
@@ -472,25 +492,29 @@ ORDEM DE RELEVÂNCIA (números separados por vírgula):"""
             context_text += f"\n--- Documento {i}: {item.tipo} {item.numero}/{item.ano} ({item.filename}) ---\n"
             context_text += f"{item.chunk_text}\n"
 
-        try:
-            prompt = f"""Você é um assistente jurídico especializado em atos normativos do TJMG (Tribunal de Justiça de Minas Gerais).
+        sys_prompt = TJMG_SYSTEM_PROMPT if use_enriched else GENERIC_SYSTEM_PROMPT
 
-Com base nos documentos abaixo, responda à pergunta do usuário de forma clara, objetiva e fundamentada, citando os atos normativos relevantes.
+        try:
+            prompt = f"""Com base EXCLUSIVAMENTE nos documentos abaixo, responda à pergunta do usuário.
 
 DOCUMENTOS ENCONTRADOS:
 {context_text}
 
 PERGUNTA DO USUÁRIO: {query}
 
-INSTRUÇÕES:
-- Responda em português brasileiro
-- Cite os números e anos das portarias/resoluções quando relevante
-- Se não houver informação suficiente, indique isso claramente
-- Seja conciso mas completo
+INSTRUÇÕES PARA A RESPOSTA:
+1. Cite SEMPRE o tipo, número e ano dos atos normativos relevantes (ex: "Resolução nº 973/2021")
+2. Se um ato revogou ou alterou outro, explique a cadeia normativa
+3. Diferencie entre atos VIGENTES e REVOGADOS — priorize os vigentes
+4. Indique o órgão emissor quando relevante (Presidência, Corregedoria, Órgão Especial)
+5. Se a pergunta não puder ser respondida com os documentos encontrados, diga claramente e sugira termos de busca alternativos
+6. Responda em português brasileiro, de forma clara e objetiva
+7. Use formatação Markdown para melhor legibilidade (negritos, listas)
+8. Ao final, se houver atos que complementem o tema, sugira ao usuário buscar por eles
 
 RESPOSTA:"""
 
-            answer = _llm_generate(prompt)
+            answer = _llm_generate(prompt, model=model, system_prompt=sys_prompt)
 
             answer += "\n\n---\n**📚 Fontes consultadas:**\n"
             for item in context[:5]:

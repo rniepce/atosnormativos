@@ -1,12 +1,13 @@
 import { useState, useRef, useEffect } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import Sidebar from './Sidebar';
+import ChatMessage from './ChatMessage';
 
 function App() {
   const [messages, setMessages] = useState([]);
   const [prompt, setPrompt] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // Sidebar states
   const [filterStatus, setFilterStatus] = useState('');
@@ -35,6 +36,58 @@ function App() {
     setMessages([]);
   };
 
+  const handleUploadFile = async (file) => {
+    setIsUploading(true);
+
+    // Show upload message
+    setMessages(prev => [
+      ...prev,
+      { role: 'user', content: `📄 Subindo ato normativo: **${file.name}**` }
+    ]);
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const response = await fetch(`${backendUrl}/upload`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const meta = data.metadata || {};
+        const answer = `✅ **Ato normativo processado com sucesso!**\n\n` +
+          `- **Arquivo:** ${data.filename}\n` +
+          `- **Tipo:** ${meta.tipo || 'N/A'}\n` +
+          `- **Número:** ${meta.numero || 'N/A'}/${meta.ano || 'N/A'}\n` +
+          `- **Órgão:** ${meta.orgao || 'N/A'}\n` +
+          `- **Status:** ${meta.status || 'N/A'}\n` +
+          `- **Assunto:** ${meta.assunto_resumo || 'N/A'}\n` +
+          `- **Chunks criados:** ${data.chunks_created}\n\n` +
+          `O documento já está disponível para buscas.`;
+
+        setMessages(prev => [
+          ...prev,
+          { role: 'assistant', content: answer }
+        ]);
+      } else {
+        const errorText = await response.text();
+        setMessages(prev => [
+          ...prev,
+          { role: 'assistant', content: `❌ Erro no upload: ${errorText}` }
+        ]);
+      }
+    } catch (error) {
+      setMessages(prev => [
+        ...prev,
+        { role: 'assistant', content: `❌ Erro ao conectar: ${error.message}` }
+      ]);
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!prompt.trim() || isLoading) return;
@@ -47,6 +100,8 @@ function App() {
     try {
       const payload = {
         query: userMessage.content,
+        model: selectedModel,
+        use_enriched_prompt: useEnrichedPrompt,
       };
 
       if (filterStatus) payload.filter_status = filterStatus;
@@ -89,7 +144,24 @@ function App() {
   };
 
   return (
-    <div id="root">
+    <>
+      {/* Hamburger button — visible only on mobile via CSS */}
+      <button
+        className={`hamburger-btn ${sidebarOpen ? 'active' : ''}`}
+        onClick={() => setSidebarOpen(!sidebarOpen)}
+        aria-label="Menu"
+      >
+        <span />
+        <span />
+        <span />
+      </button>
+
+      {/* Overlay behind sidebar on mobile */}
+      <div
+        className={`sidebar-overlay ${sidebarOpen ? 'visible' : ''}`}
+        onClick={() => setSidebarOpen(false)}
+      />
+
       <Sidebar
         filterStatus={filterStatus}
         setFilterStatus={setFilterStatus}
@@ -100,6 +172,10 @@ function App() {
         googleApiKey={googleApiKey}
         setGoogleApiKey={setGoogleApiKey}
         onClearChat={clearChat}
+        onUploadFile={handleUploadFile}
+        isUploading={isUploading}
+        isOpen={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
       />
 
       <main className="main-content">
@@ -160,71 +236,9 @@ function App() {
           </div>
         </div>
       </main>
-    </div>
+    </>
   );
 }
 
-const ChatMessage = ({ message }) => {
-  const isUser = message.role === 'user';
-  const roleClass = isUser ? 'user' : 'assistant';
-  const [sourcesExpanded, setSourcesExpanded] = useState(false);
-
-  return (
-    <div className={`chat-message ${roleClass}`}>
-      <div className={`chat-avatar ${roleClass}`}>
-        {isUser ? '👤' : '🤖'}
-      </div>
-
-      <div className="chat-content">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>
-          {message.content}
-        </ReactMarkdown>
-
-        {message.sources && message.sources.length > 0 && (
-          <div className="sources-expander">
-            <div
-              className="sources-header"
-              onClick={() => setSourcesExpanded(!sourcesExpanded)}
-            >
-              <span>📚 Fontes Consultadas ({message.sources.length})</span>
-              <span>{sourcesExpanded ? '▼' : '▶'}</span>
-            </div>
-
-            {sourcesExpanded && (
-              <div className="sources-content">
-                {message.sources.map((src, idx) => {
-                  let badgeClass = 'badge-unknown';
-                  if (src.status === 'VIGENTE') badgeClass = 'badge-vigente';
-                  if (src.status === 'REVOGADO') badgeClass = 'badge-revogado';
-
-                  return (
-                    <div className="source-card" key={idx}>
-                      <div className="source-title">
-                        {src.tipo} {src.numero}/{src.ano}
-                        {src.status && (
-                          <span className={`badge ${badgeClass}`}>
-                            {src.status}
-                          </span>
-                        )}
-                        {src.score !== undefined && (
-                          <span className="source-score">
-                            Score: {src.score.toFixed(2)}
-                          </span>
-                        )}
-                      </div>
-                      <div className="source-excerpt">
-                        {src.chunk_text ? src.chunk_text.substring(0, 300) + '…' : ''}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
 
 export default App;

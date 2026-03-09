@@ -8,12 +8,10 @@ from fastapi.responses import FileResponse
 from src.backend.models import SearchRequest, SearchResponse
 from src.backend.search import SearchService, get_active_llm_info, set_request_google_key, clear_request_google_key
 from src.ingestion.extraction import extract_text_from_pdf
-from src.ingestion.classification import DocumentClassifier
-from src.ingestion.chunking import LegalTextSplitter
 from src.ingestion.storage import DocumentStorage
-from src.utils.vertex import VertexAIClient
 import logging
 import os
+import json
 import tempfile
 
 # Configure logging
@@ -46,15 +44,17 @@ async def model_info():
 
 @app.post("/upload")
 async def upload_pdf(file: UploadFile = File(...)):
-    """Upload and process a PDF file for RAG ingestion."""
+    """Upload and process a PDF/DOCX file for RAG ingestion using Azure."""
     logger.info(f"Received upload: {file.filename}")
     
-    if not file.filename.endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Only PDF files are supported.")
+    allowed_ext = (".pdf", ".doc", ".docx")
+    if not file.filename.lower().endswith(allowed_ext):
+        raise HTTPException(status_code=400, detail=f"Supported formats: {', '.join(allowed_ext)}")
     
     try:
         # Save to temp file
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+        suffix = os.path.splitext(file.filename)[1]
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
             content = await file.read()
             tmp.write(content)
             tmp_path = tmp.name
@@ -62,24 +62,65 @@ async def upload_pdf(file: UploadFile = File(...)):
         # 1. Extract text
         text = extract_text_from_pdf(tmp_path)
         if not text:
-            raise HTTPException(status_code=400, detail="Could not extract text from PDF.")
+            raise HTTPException(status_code=400, detail="Could not extract text from file.")
         
-        # 2. Classify
-        vertex_client = VertexAIClient()
-        classifier = DocumentClassifier(vertex_client)
-        metadata = classifier.classify_document(text)
+        # 2. Classify using Azure LLM
+        classify_prompt = f"""Você é um classificador jurídico especializado em atos normativos do TJMG.
+Analise o texto abaixo e extraia os metadados em formato JSON:
+{{
+  "tipo": "Portaria|Resolução|Provimento|Portaria Conjunta|Aviso|Ordem de Serviço|Outro",
+  "numero": "string (ex: 1234)",
+  "ano": int (ex: 2023),
+  "orgao": "string (ex: Corregedoria, Presidência)",
+  "status": "VIGENTE|REVOGADO",
+  "assunto_resumo": "Resumo conciso",
+  "tags": ["tag1", "tag2"]
+}}
+
+Texto (primeiros 10.000 caracteres):
+{text[:10000]}
+
+Responda APENAS com JSON válido:"""
         
-        if not metadata:
+        try:
+            metadata_text = _llm_generate(classify_prompt)
+            metadata_text = metadata_text.replace("```json", "").replace("```", "").strip()
+            metadata = json.loads(metadata_text)
+        except Exception as e:
+            logger.warning(f"Classification failed: {e}, using defaults")
             metadata = {
                 "tipo": "Desconhecido", "numero": "0", "ano": 0,
-                "status": "Indefinido", "assunto_resumo": "Falha na classificação", "tags": []
+                "orgao": "Desconhecido", "status": "VIGENTE",
+                "assunto_resumo": "Classificação pendente", "tags": []
             }
         
-        # 3. Chunk & Embed
-        splitter = LegalTextSplitter()
-        chunks = splitter.split_text(text, metadata)
+        # 3. Chunk text with legal separators
+        from langchain_text_splitters import RecursiveCharacterTextSplitter
+        splitter = RecursiveCharacterTextSplitter(
+            chunk_size=1000, chunk_overlap=200,
+            separators=["\nCAPÍTULO", "\nSeção", "\nArt.", "\nParágrafo", "\n§", "\n\n", "\n", " "]
+        )
+        raw_chunks = splitter.split_text(text)
         
-        # 4. Store
+        # 4. Embed with Azure (same model as search)
+        azure_client = get_azure_client()
+        if azure_client is None:
+            raise HTTPException(status_code=500, detail="Azure OpenAI client not configured")
+        
+        chunks = []
+        # Process in batches of 100
+        for i in range(0, len(raw_chunks), 100):
+            batch = raw_chunks[i:i+100]
+            response = azure_client.embeddings.create(
+                input=batch, model=AZURE_EMBEDDING_MODEL, dimensions=AZURE_EMBEDDING_DIMENSIONS
+            )
+            for j, emb_data in enumerate(response.data):
+                chunks.append({
+                    "conteudo_texto": batch[j],
+                    "embedding": emb_data.embedding
+                })
+        
+        # 5. Store in database
         storage = DocumentStorage()
         await storage.save_document_and_chunks(
             filename=file.filename,
@@ -98,8 +139,10 @@ async def upload_pdf(file: UploadFile = File(...)):
             "chunks_created": len(chunks)
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Upload processing error: {e}")
+        logger.error(f"Upload processing error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/search", response_model=SearchResponse)

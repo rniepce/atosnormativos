@@ -47,7 +47,12 @@ MODEL = "text-embedding-3-large"
 
 # ── Database connection ─────────────────────────────────────────
 def get_dsn() -> str:
-    return "postgresql://postgres:pvjPoRKOeQOVmZNCulAVYXqpWmnefbsa@yamanote.proxy.rlwy.net:23504/railway"
+    user = os.getenv("POSTGRES_USER", "postgres")
+    password = os.getenv("POSTGRES_PASSWORD", "")
+    host = os.getenv("POSTGRES_HOST", "localhost")
+    port = os.getenv("POSTGRES_PORT", "5432")
+    db = os.getenv("POSTGRES_DB", "railway")
+    return f"postgresql://{user}:{password}@{host}:{port}/{db}"
 
 # ── Embeddings ──────────────────────────────────────────────────
 async def get_embeddings(texts: List[str]) -> List[List[float]]:

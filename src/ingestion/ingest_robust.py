@@ -10,13 +10,7 @@ from typing import Set
 
 # Load env manually
 from dotenv import load_dotenv
-load_dotenv('/Users/rafaelpimentel/Downloads/atosnormativos/.env')
-
-os.environ['POSTGRES_HOST'] = 'gondola.proxy.rlwy.net'
-os.environ['POSTGRES_PORT'] = '45477'
-os.environ['POSTGRES_USER'] = 'postgres'
-os.environ['POSTGRES_PASSWORD'] = 'pgvector123secure'
-os.environ['POSTGRES_DB'] = 'tjmg_rag'
+load_dotenv()
 
 from sentence_transformers import SentenceTransformer
 import asyncpg

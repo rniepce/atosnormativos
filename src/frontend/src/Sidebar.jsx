@@ -34,7 +34,7 @@ const Sidebar = ({
     const hasKey = googleApiKey && googleApiKey.trim().length > 0;
 
     return (
-        <div className="sidebar">
+        <div className={`sidebar ${isOpen ? 'open' : ''}`}>
             {/* Logo */}
             <div className="sidebar-logo">
                 <svg width="60" height="55" viewBox="0 0 120 110" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -48,7 +48,7 @@ const Sidebar = ({
 
             <hr />
 
-            {/* Model Info */}
+            {/* Model Selector */}
             <h3>🤖 Modelo</h3>
             <div className="form-group">
                 <label>LLM</label>
@@ -122,10 +122,12 @@ const Sidebar = ({
                 <select value={filterTipo} onChange={(e) => setFilterTipo(e.target.value)}>
                     <option value="">Todos</option>
                     <option value="Portaria">Portaria</option>
+                    <option value="Portaria Conjunta">Portaria Conjunta</option>
                     <option value="Resolução">Resolução</option>
-                    <option value="Provimento">Provimento</option>
-                    <option value="Recomendação">Recomendação</option>
-                    <option value="Instrução Normativa">Instrução Normativa</option>
+                    <option value="Provimento Conjunto">Provimento</option>
+                    <option value="Aviso">Aviso</option>
+                    <option value="Ordem de Serviço">Ordem de Serviço</option>
+                    <option value="Emenda Regimental">Emenda Regimental</option>
                 </select>
             </div>
 
@@ -142,9 +144,30 @@ const Sidebar = ({
             <hr />
 
             {/* Action Buttons */}
-            <button className="btn-clear" onClick={onClearChat}>
-                🗑️ Limpar Conversa
+            <button className="btn-primary" onClick={handleClearChat}>
+                ✨ Novo Chat
             </button>
+
+            <button
+                className="btn-upload"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isUploading}
+            >
+                {isUploading ? (
+                    <>
+                        <div className="spinner small" /> Processando...
+                    </>
+                ) : (
+                    '📄 Subir Ato Normativo'
+                )}
+            </button>
+            <input
+                ref={fileInputRef}
+                type="file"
+                accept=".pdf,.doc,.docx"
+                style={{ display: 'none' }}
+                onChange={handleFileSelect}
+            />
 
             {/* Footer */}
             <div className="sidebar-footer">
