@@ -100,8 +100,6 @@ function App() {
     try {
       const payload = {
         query: userMessage.content,
-        model: selectedModel,
-        use_enriched_prompt: useEnrichedPrompt,
       };
 
       if (filterStatus) payload.filter_status = filterStatus;

@@ -9,10 +9,28 @@ const Sidebar = ({
     setFilterAno,
     googleApiKey,
     setGoogleApiKey,
-    onClearChat
+    onClearChat,
+    onUploadFile,
+    isUploading,
+    isOpen,
+    onClose,
 }) => {
     const [modelInfo, setModelInfo] = useState({ label: 'Carregando...', provider: '' });
     const [showKey, setShowKey] = useState(false);
+    const fileInputRef = React.useRef(null);
+
+    const handleFileSelect = async (e) => {
+        const file = e.target.files[0];
+        if (file) {
+            await onUploadFile(file);
+            e.target.value = '';
+        }
+    };
+
+    const handleClearChat = () => {
+        onClearChat();
+        onClose();
+    };
 
     const backendUrl = import.meta.env.PROD ? window.location.origin : (import.meta.env.VITE_BACKEND_URL || "http://localhost:8080");
 

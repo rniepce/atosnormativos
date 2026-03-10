@@ -239,7 +239,7 @@ class SearchService:
     def __init__(self):
         self.client = get_azure_client()
 
-    def rewrite_query(self, original_query: str, model: str = None, use_enriched: bool = True) -> str:
+    def rewrite_query(self, original_query: str, use_enriched: bool = True) -> str:
         """Rewrite query with TJMG domain vocabulary for better vector search."""
         if not use_enriched:
             return original_query.strip()
@@ -266,14 +266,14 @@ EXEMPLOS:
 Query original: {original_query}
 
 Query expandida:"""
-            rewritten = _llm_generate(prompt, model=model)
+            rewritten = _llm_generate(prompt)
             logger.info(f"Query rewritten: '{original_query}' -> '{rewritten}'")
             return rewritten
         except Exception as e:
             logger.warning(f"Query rewrite failed: {e}")
             return original_query.strip()
 
-    def _rerank_with_llm(self, query: str, results: List[SearchResultItem], model: str = None) -> List[SearchResultItem]:
+    def _rerank_with_llm(self, query: str, results: List[SearchResultItem]) -> List[SearchResultItem]:
         """Use LLM to rerank results by relevance to the query."""
         if len(results) <= 3:
             return results
@@ -295,7 +295,7 @@ DOCUMENTOS:
 
 ORDEM DE RELEVÂNCIA (números separados por vírgula):"""
 
-            order_text = _llm_generate(prompt, model=model)
+            order_text = _llm_generate(prompt)
 
             order = []
             for num in order_text.replace(" ", "").split(","):
@@ -334,11 +334,8 @@ ORDEM DE RELEVÂNCIA (números separados por vírgula):"""
 
         try:
             # Optionally rewrite query for better search
-            rewritten_query = self.rewrite_query(
-                request.query, model=request.model,
-                use_enriched=request.use_enriched_prompt
-            )
-            logger.info(f"Query (enriched={request.use_enriched_prompt}): {rewritten_query}")
+            rewritten_query = self.rewrite_query(request.query)
+            logger.info(f"Query (enriched=True): {rewritten_query}")
 
             # Generate embedding via Azure OpenAI (embeddings always use Azure)
             if self.client is None:
@@ -475,7 +472,7 @@ ORDEM DE RELEVÂNCIA (números separados por vírgula):"""
 
             # Rerank with LLM if enabled
             if request.use_reranking and len(results) > 3:
-                results = self._rerank_with_llm(request.query, results, model=request.model)
+                results = self._rerank_with_llm(request.query, results)
 
             return results[:10]
 
@@ -492,7 +489,7 @@ ORDEM DE RELEVÂNCIA (números separados por vírgula):"""
             context_text += f"\n--- Documento {i}: {item.tipo} {item.numero}/{item.ano} ({item.filename}) ---\n"
             context_text += f"{item.chunk_text}\n"
 
-        sys_prompt = TJMG_SYSTEM_PROMPT if use_enriched else GENERIC_SYSTEM_PROMPT
+        # Always use enriched TJMG prompt (model selection is handled by _llm_generate)
 
         try:
             prompt = f"""Com base EXCLUSIVAMENTE nos documentos abaixo, responda à pergunta do usuário.
@@ -514,7 +511,7 @@ INSTRUÇÕES PARA A RESPOSTA:
 
 RESPOSTA:"""
 
-            answer = _llm_generate(prompt, model=model, system_prompt=sys_prompt)
+            answer = _llm_generate(prompt)
 
             answer += "\n\n---\n**📚 Fontes consultadas:**\n"
             for item in context[:5]:
