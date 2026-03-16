@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import type { ChatMessageProps } from './types';
 
-const ChatMessage = ({ message }) => {
+const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
     const isUser = message.role === 'user';
     const roleClass = isUser ? 'user' : 'assistant';
     const [sourcesExpanded, setSourcesExpanded] = useState(false);

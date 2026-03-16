@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, type ChangeEvent } from 'react';
+import type { SidebarProps, ModelInfo } from './types';
 
-const Sidebar = ({
+const Sidebar: React.FC<SidebarProps> = ({
     filterStatus,
     setFilterStatus,
     filterTipo,
@@ -15,12 +16,12 @@ const Sidebar = ({
     isOpen,
     onClose,
 }) => {
-    const [modelInfo, setModelInfo] = useState({ label: 'Carregando...', provider: '' });
+    const [modelInfo, setModelInfo] = useState<ModelInfo>({ label: 'Carregando...', provider: '' });
     const [showKey, setShowKey] = useState(false);
-    const fileInputRef = React.useRef(null);
+    const fileInputRef = React.useRef<HTMLInputElement>(null);
 
-    const handleFileSelect = async (e) => {
-        const file = e.target.files[0];
+    const handleFileSelect = async (e: ChangeEvent<HTMLInputElement>): Promise<void> => {
+        const file = e.target.files?.[0];
         if (file) {
             await onUploadFile(file);
             e.target.value = '';
@@ -37,7 +38,7 @@ const Sidebar = ({
     useEffect(() => {
         fetch(`${backendUrl}/api/model-info`)
             .then(res => res.json())
-            .then(data => setModelInfo(data))
+            .then((data: ModelInfo) => setModelInfo(data))
             .catch(() => setModelInfo({ label: 'Indisponível', provider: 'none' }));
     }, [backendUrl]);
 

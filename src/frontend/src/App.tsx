@@ -1,9 +1,10 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, type FormEvent, type KeyboardEvent, type ChangeEvent } from 'react';
 import Sidebar from './Sidebar';
 import ChatMessage from './ChatMessage';
+import type { Message, SearchPayload, UploadResponse } from './types';
 
 function App() {
-  const [messages, setMessages] = useState([]);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [prompt, setPrompt] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -13,11 +14,11 @@ function App() {
   const [filterStatus, setFilterStatus] = useState('');
   const [filterTipo, setFilterTipo] = useState('');
   const [filterAno, setFilterAno] = useState('');
-  const [googleApiKey, setGoogleApiKey] = useState(() => {
+  const [googleApiKey, setGoogleApiKey] = useState<string>(() => {
     try { return localStorage.getItem('google_api_key') || ''; } catch { return ''; }
   });
 
-  const chatEndRef = useRef(null);
+  const chatEndRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom of chat
   useEffect(() => {
@@ -26,7 +27,7 @@ function App() {
 
   // Persist Google API key to localStorage
   useEffect(() => {
-    try { localStorage.setItem('google_api_key', googleApiKey); } catch { }
+    try { localStorage.setItem('google_api_key', googleApiKey); } catch { /* noop */ }
   }, [googleApiKey]);
 
   // In production, the backend and frontend are hosted on the same origin
@@ -36,7 +37,7 @@ function App() {
     setMessages([]);
   };
 
-  const handleUploadFile = async (file) => {
+  const handleUploadFile = async (file: File): Promise<void> => {
     setIsUploading(true);
 
     // Show upload message
@@ -55,7 +56,7 @@ function App() {
       });
 
       if (response.ok) {
-        const data = await response.json();
+        const data: UploadResponse = await response.json();
         const meta = data.metadata || {};
         const answer = `✅ **Ato normativo processado com sucesso!**\n\n` +
           `- **Arquivo:** ${data.filename}\n` +
@@ -79,32 +80,33 @@ function App() {
         ]);
       }
     } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
       setMessages(prev => [
         ...prev,
-        { role: 'assistant', content: `❌ Erro ao conectar: ${error.message}` }
+        { role: 'assistant', content: `❌ Erro ao conectar: ${msg}` }
       ]);
     } finally {
       setIsUploading(false);
     }
   };
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = async (e: FormEvent | KeyboardEvent): Promise<void> => {
     e.preventDefault();
     if (!prompt.trim() || isLoading) return;
 
-    const userMessage = { role: 'user', content: prompt };
+    const userMessage: Message = { role: 'user', content: prompt };
     setMessages(prev => [...prev, userMessage]);
     setPrompt('');
     setIsLoading(true);
 
     try {
-      const payload = {
+      const payload: SearchPayload = {
         query: userMessage.content,
       };
 
       if (filterStatus) payload.filter_status = filterStatus;
       if (filterTipo) payload.filter_tipo = filterTipo;
-      if (filterAno && !isNaN(filterAno)) payload.filter_ano = parseInt(filterAno, 10);
+      if (filterAno && !isNaN(Number(filterAno))) payload.filter_ano = parseInt(filterAno, 10);
       if (googleApiKey.trim()) payload.google_api_key = googleApiKey.trim();
 
       const response = await fetch(`${backendUrl}/search`, {
@@ -117,7 +119,7 @@ function App() {
 
       if (response.ok) {
         const data = await response.json();
-        const answer = data.answer || "Não foi possível gerar uma resposta.";
+        const answer: string = data.answer || "Não foi possível gerar uma resposta.";
         const sources = data.sources || [];
 
         setMessages(prev => [
@@ -132,9 +134,10 @@ function App() {
         ]);
       }
     } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
       setMessages(prev => [
         ...prev,
-        { role: 'assistant', content: `Erro ao conectar com o backend: ${error.message}` }
+        { role: 'assistant', content: `Erro ao conectar com o backend: ${msg}` }
       ]);
     } finally {
       setIsLoading(false);
@@ -213,8 +216,8 @@ function App() {
                 className="chat-input"
                 placeholder="Faça sua pergunta sobre atos normativos…"
                 value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                onKeyDown={(e) => {
+                onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setPrompt(e.target.value)}
+                onKeyDown={(e: KeyboardEvent<HTMLTextAreaElement>) => {
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
                     handleSubmit(e);
