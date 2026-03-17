@@ -10,6 +10,8 @@ const Sidebar: React.FC<SidebarProps> = ({
     setFilterAno,
     googleApiKey,
     setGoogleApiKey,
+    uploadApiKey,
+    setUploadApiKey,
     onClearChat,
     onUploadFile,
     isUploading,
@@ -187,6 +189,19 @@ const Sidebar: React.FC<SidebarProps> = ({
                 style={{ display: 'none' }}
                 onChange={handleFileSelect}
             />
+
+            <div className="form-group" style={{ marginTop: '0.5rem' }}>
+                <label>🔑 Chave de Upload</label>
+                <input
+                    type="password"
+                    placeholder="API Key para upload"
+                    value={uploadApiKey}
+                    onChange={(e) => setUploadApiKey(e.target.value)}
+                />
+                <div style={{ fontSize: '0.6rem', color: 'rgba(255,255,255,0.35)', marginTop: '0.2rem' }}>
+                    Necessária para subir documentos
+                </div>
+            </div>
 
             {/* Footer */}
             <div className="sidebar-footer">

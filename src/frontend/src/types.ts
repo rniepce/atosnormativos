@@ -57,6 +57,8 @@ export interface SidebarProps {
   setFilterAno: (v: string) => void;
   googleApiKey: string;
   setGoogleApiKey: (v: string) => void;
+  uploadApiKey: string;
+  setUploadApiKey: (v: string) => void;
   onClearChat: () => void;
   onUploadFile: (file: File) => Promise<void>;
   isUploading: boolean;

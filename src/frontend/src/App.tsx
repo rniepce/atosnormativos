@@ -17,6 +17,9 @@ function App() {
   const [googleApiKey, setGoogleApiKey] = useState<string>(() => {
     try { return localStorage.getItem('google_api_key') || ''; } catch { return ''; }
   });
+  const [uploadApiKey, setUploadApiKey] = useState<string>(() => {
+    try { return localStorage.getItem('upload_api_key') || ''; } catch { return ''; }
+  });
 
   const chatEndRef = useRef<HTMLDivElement>(null);
 
@@ -29,6 +32,10 @@ function App() {
   useEffect(() => {
     try { localStorage.setItem('google_api_key', googleApiKey); } catch { /* noop */ }
   }, [googleApiKey]);
+
+  useEffect(() => {
+    try { localStorage.setItem('upload_api_key', uploadApiKey); } catch { /* noop */ }
+  }, [uploadApiKey]);
 
   // In production, the backend and frontend are hosted on the same origin
   const backendUrl = import.meta.env.PROD ? window.location.origin : (import.meta.env.VITE_BACKEND_URL || "http://localhost:8080");
@@ -50,8 +57,14 @@ function App() {
       const formData = new FormData();
       formData.append('file', file);
 
+      const headers: Record<string, string> = {};
+      if (uploadApiKey.trim()) {
+        headers['X-API-Key'] = uploadApiKey.trim();
+      }
+
       const response = await fetch(`${backendUrl}/upload`, {
         method: 'POST',
+        headers,
         body: formData,
       });
 
@@ -172,6 +185,8 @@ function App() {
         setFilterAno={setFilterAno}
         googleApiKey={googleApiKey}
         setGoogleApiKey={setGoogleApiKey}
+        uploadApiKey={uploadApiKey}
+        setUploadApiKey={setUploadApiKey}
         onClearChat={clearChat}
         onUploadFile={handleUploadFile}
         isUploading={isUploading}

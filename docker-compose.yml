@@ -8,7 +8,7 @@ services:
       - "5432:5432"
     environment:
       POSTGRES_USER: admin
-      POSTGRES_PASSWORD: password
+      POSTGRES_PASSWORD: tjmg_proto_s3cur3_2025
       POSTGRES_DB: tjmg_rag
     volumes:
       - pgdata:/var/lib/postgresql/data
