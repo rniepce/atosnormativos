@@ -198,8 +198,7 @@ function App() {
               </p>
             </div>
             <div className="header-right">
-              <button className="header-btn"><span className="icon">👤</span> Usera profile ⌄</button>
-              <button className="header-btn">Options ⌄</button>
+              {/* Removed User profile and Options */}
             </div>
           </div>
 
