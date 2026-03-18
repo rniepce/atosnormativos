@@ -17,4 +17,4 @@ openai
 httpx
 google-cloud-aiplatform
 slowapi
-python-magic-bin
+python-magic
