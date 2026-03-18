@@ -13,10 +13,6 @@ function App() {
   // Sidebar states
   const [filterStatus, setFilterStatus] = useState('');
   const [filterTipo, setFilterTipo] = useState('');
-  const [filterAno, setFilterAno] = useState('');
-  const [googleApiKey, setGoogleApiKey] = useState<string>(() => {
-    try { return localStorage.getItem('google_api_key') || ''; } catch { return ''; }
-  });
   const [uploadApiKey, setUploadApiKey] = useState<string>(() => {
     try { return localStorage.getItem('upload_api_key') || ''; } catch { return ''; }
   });
@@ -27,11 +23,6 @@ function App() {
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
-
-  // Persist Google API key to localStorage
-  useEffect(() => {
-    try { localStorage.setItem('google_api_key', googleApiKey); } catch { /* noop */ }
-  }, [googleApiKey]);
 
   useEffect(() => {
     try { localStorage.setItem('upload_api_key', uploadApiKey); } catch { /* noop */ }
@@ -119,8 +110,6 @@ function App() {
 
       if (filterStatus) payload.filter_status = filterStatus;
       if (filterTipo) payload.filter_tipo = filterTipo;
-      if (filterAno && !isNaN(Number(filterAno))) payload.filter_ano = parseInt(filterAno, 10);
-      if (googleApiKey.trim()) payload.google_api_key = googleApiKey.trim();
 
       const response = await fetch(`${backendUrl}/search`, {
         method: 'POST',
@@ -181,10 +170,6 @@ function App() {
         setFilterStatus={setFilterStatus}
         filterTipo={filterTipo}
         setFilterTipo={setFilterTipo}
-        filterAno={filterAno}
-        setFilterAno={setFilterAno}
-        googleApiKey={googleApiKey}
-        setGoogleApiKey={setGoogleApiKey}
         uploadApiKey={uploadApiKey}
         setUploadApiKey={setUploadApiKey}
         onClearChat={clearChat}
@@ -197,11 +182,16 @@ function App() {
       <main className="main-content">
         <div className="block-container">
           <div className="header-card">
-            <h1 className="header-title">💬 Consulta Inteligente</h1>
-            <p className="header-subtitle">
-              Pesquise portarias, resoluções, provimentos e demais atos normativos do TJMG
-              utilizando inteligência artificial.
-            </p>
+            <div className="header-left">
+              <h1 className="header-title">Consulta Inteligente</h1>
+              <p className="header-subtitle">
+                Pesquise portarias, resoluções, provimentos e demais atos normativos do TJMG utilizando inteligência artificial.
+              </p>
+            </div>
+            <div className="header-right">
+              <button className="header-btn"><span className="icon">👤</span> Usera profile ⌄</button>
+              <button className="header-btn">Options ⌄</button>
+            </div>
           </div>
 
           <div className="chat-container">
@@ -238,16 +228,19 @@ function App() {
                     handleSubmit(e);
                   }
                 }}
-                disabled={isLoading}
                 rows={1}
               />
-              <button
-                type="submit"
-                className="chat-submit-btn"
-                disabled={!prompt.trim() || isLoading}
-              >
-                ↑
-              </button>
+              <div className="chat-input-actions">
+                <button type="button" className="icon-btn" title="Anexar">🔗</button>
+                <button type="button" className="icon-btn" title="Bot">🤖</button>
+                <button
+                  type="submit"
+                  className="chat-submit-btn"
+                  disabled={!prompt.trim() || isLoading}
+                >
+                  ➔
+                </button>
+              </div>
             </form>
           </div>
         </div>

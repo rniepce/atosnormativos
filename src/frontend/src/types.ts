@@ -53,10 +53,6 @@ export interface SidebarProps {
   setFilterStatus: (v: string) => void;
   filterTipo: string;
   setFilterTipo: (v: string) => void;
-  filterAno: string;
-  setFilterAno: (v: string) => void;
-  googleApiKey: string;
-  setGoogleApiKey: (v: string) => void;
   uploadApiKey: string;
   setUploadApiKey: (v: string) => void;
   onClearChat: () => void;

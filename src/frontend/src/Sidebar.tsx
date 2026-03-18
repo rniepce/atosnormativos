@@ -6,10 +6,6 @@ const Sidebar: React.FC<SidebarProps> = ({
     setFilterStatus,
     filterTipo,
     setFilterTipo,
-    filterAno,
-    setFilterAno,
-    googleApiKey,
-    setGoogleApiKey,
     uploadApiKey,
     setUploadApiKey,
     onClearChat,
@@ -19,7 +15,6 @@ const Sidebar: React.FC<SidebarProps> = ({
     onClose,
 }) => {
     const [modelInfo, setModelInfo] = useState<ModelInfo>({ label: 'Carregando...', provider: '' });
-    const [showKey, setShowKey] = useState(false);
     const fileInputRef = React.useRef<HTMLInputElement>(null);
 
     const handleFileSelect = async (e: ChangeEvent<HTMLInputElement>): Promise<void> => {
@@ -44,169 +39,102 @@ const Sidebar: React.FC<SidebarProps> = ({
             .catch(() => setModelInfo({ label: 'Indisponível', provider: 'none' }));
     }, [backendUrl]);
 
-    const providerBadge = modelInfo.provider === 'ollama'
-        ? { text: 'LOCAL', color: '#00B894' }
-        : modelInfo.provider === 'google'
-            ? { text: 'GOOGLE AI', color: '#4285F4' }
-            : modelInfo.provider === 'azure'
-                ? { text: 'CLOUD', color: '#0984E3' }
-                : { text: '—', color: '#636E72' };
-
-    const hasKey = googleApiKey && googleApiKey.trim().length > 0;
-
     return (
         <div className={`sidebar ${isOpen ? 'open' : ''}`}>
             {/* Logo */}
             <div className="sidebar-logo">
-                <svg width="60" height="55" viewBox="0 0 120 110" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M60 8 L110 100 L10 100 Z" stroke="white" strokeWidth="10" strokeLinejoin="round" fill="none" />
+                <svg width="32" height="32" viewBox="0 0 120 110" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M60 8 L110 100 L10 100 Z" stroke="currentColor" strokeWidth="10" strokeLinejoin="round" fill="none" />
                 </svg>
                 <div>
                     <div className="sidebar-logo-text">TJMG</div>
-                    <div className="sidebar-logo-sub">Atos Normativos</div>
+                    <div className="sidebar-logo-sub">ATOS NORMATIVOS</div>
                 </div>
             </div>
-
-            <hr />
-
-            {/* Model Selector */}
-            <h3>🤖 Modelo</h3>
-            <div className="form-group">
-                <label>LLM</label>
-                <div style={{ color: 'rgba(255,255,255,0.85)', fontSize: '0.85rem', padding: '0.5rem 0', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    {modelInfo.label}
-                    <span style={{
-                        background: hasKey || modelInfo.provider !== 'google' ? providerBadge.color : '#636E72',
-                        color: '#fff',
-                        fontSize: '0.6rem',
-                        padding: '2px 8px',
-                        borderRadius: '10px',
-                        fontWeight: 600,
-                        letterSpacing: '0.05em',
-                    }}>
-                        {hasKey || modelInfo.provider !== 'google' ? providerBadge.text : 'SEM CHAVE'}
-                    </span>
-                </div>
-            </div>
-
-            {modelInfo.provider === 'google' && (
-                <div className="form-group">
-                    <label>🔑 Google API Key</label>
-                    <div style={{ position: 'relative' }}>
-                        <input
-                            type={showKey ? 'text' : 'password'}
-                            placeholder="Cole sua chave aqui..."
-                            value={googleApiKey}
-                            onChange={(e) => setGoogleApiKey(e.target.value)}
-                            style={{ paddingRight: '2.5rem' }}
-                        />
-                        <button
-                            type="button"
-                            onClick={() => setShowKey(!showKey)}
-                            style={{
-                                position: 'absolute',
-                                right: '6px',
-                                top: '50%',
-                                transform: 'translateY(-50%)',
-                                background: 'none',
-                                border: 'none',
-                                color: 'rgba(255,255,255,0.5)',
-                                cursor: 'pointer',
-                                fontSize: '0.8rem',
-                                padding: '4px',
-                            }}
-                        >
-                            {showKey ? '🙈' : '👁️'}
-                        </button>
-                    </div>
-                    <div style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.4)', marginTop: '0.2rem' }}>
-                        Grátis em <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" style={{ color: '#4285F4' }}>aistudio.google.com</a>
-                    </div>
-                </div>
-            )}
-
-            <hr />
 
             {/* Filters Section */}
-            <h3>🔍 Filtros</h3>
-            <div className="form-group">
-                <label>Status do Ato</label>
-                <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
-                    <option value="">Todos</option>
-                    <option value="VIGENTE">VIGENTE</option>
-                    <option value="REVOGADO">REVOGADO</option>
-                </select>
+            <div className="sidebar-section">
+                <div className="section-header">
+                    <span className="icon">≡</span> <h3>Filtros</h3>
+                    <span className="chevron">⌄</span>
+                </div>
+                {/* Visual filter options can go here, for now we keep the functional selects visually hidden or restyled */}
+                <div className="form-group">
+                    <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
+                        <option value="">Status: Todos</option>
+                        <option value="VIGENTE">VIGENTE</option>
+                        <option value="REVOGADO">REVOGADO</option>
+                    </select>
+                </div>
+                <div className="form-group">
+                    <select value={filterTipo} onChange={(e) => setFilterTipo(e.target.value)}>
+                        <option value="">Tipo: Todos</option>
+                        <option value="Portaria">Portaria</option>
+                        <option value="Resolução">Resolução</option>
+                        <option value="Provimento">Provimento</option>
+                        <option value="Aviso">Aviso</option>
+                    </select>
+                </div>
             </div>
 
-            <div className="form-group">
-                <label>Tipo de Ato</label>
-                <select value={filterTipo} onChange={(e) => setFilterTipo(e.target.value)}>
-                    <option value="">Todos</option>
-                    <option value="Portaria">Portaria</option>
-                    <option value="Portaria Conjunta">Portaria Conjunta</option>
-                    <option value="Resolução">Resolução</option>
-                    <option value="Provimento Conjunto">Provimento</option>
-                    <option value="Aviso">Aviso</option>
-                    <option value="Ordem de Serviço">Ordem de Serviço</option>
-                    <option value="Emenda Regimental">Emenda Regimental</option>
-                </select>
+            {/* Model Section */}
+            <div className="sidebar-section">
+                <div className="section-header">
+                    <span className="icon">⚙️</span>
+                    <div>
+                        <h3>Modelo</h3>
+                        <div className="sub-text">{modelInfo.label}</div>
+                    </div>
+                    <span className="chevron">&gt;</span>
+                </div>
             </div>
 
-            <div className="form-group">
-                <label>Ano</label>
-                <input
-                    type="text"
-                    placeholder="Ex: 2023"
-                    value={filterAno}
-                    onChange={(e) => setFilterAno(e.target.value)}
-                />
+            {/* Base Stats Section */}
+            <div className="sidebar-section">
+                <div className="section-header">
+                    <span className="icon">🗄️</span>
+                    <h3>Base: ~13.000 atos</h3>
+                </div>
             </div>
 
-            <hr />
+            <div className="sidebar-spacer" style={{ flexGrow: 1 }}></div>
 
-            {/* Action Buttons */}
-            <button className="btn-primary" onClick={handleClearChat}>
-                ✨ Novo Chat
-            </button>
-
-            <button
-                className="btn-upload"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={isUploading}
-            >
-                {isUploading ? (
-                    <>
-                        <div className="spinner small" /> Processando...
-                    </>
-                ) : (
-                    '📄 Subir Ato Normativo'
-                )}
-            </button>
-            <input
-                ref={fileInputRef}
-                type="file"
-                accept=".pdf,.doc,.docx"
-                style={{ display: 'none' }}
-                onChange={handleFileSelect}
-            />
-
-            <div className="form-group" style={{ marginTop: '0.5rem' }}>
-                <label>🔑 Chave de Upload</label>
+            {/* Upload Key Section - Keep functional but unobtrusive */}
+            <div className="form-group upload-key-group">
                 <input
                     type="password"
-                    placeholder="API Key para upload"
+                    placeholder="Chave de Upload (Opcional)"
                     value={uploadApiKey}
                     onChange={(e) => setUploadApiKey(e.target.value)}
                 />
-                <div style={{ fontSize: '0.6rem', color: 'rgba(255,255,255,0.35)', marginTop: '0.2rem' }}>
-                    Necessária para subir documentos
-                </div>
             </div>
 
-            {/* Footer */}
-            <div className="sidebar-footer">
-                📂 Base: ~13.000 atos normativos<br />
-                ⚖️ Tribunal de Justiça de Minas Gerais
+            {/* Action Buttons */}
+            <div className="sidebar-actions">
+                <button className="btn-primary" onClick={handleClearChat}>
+                    ✨ Novo Chat
+                </button>
+
+                <button
+                    className="btn-upload"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isUploading}
+                >
+                    {isUploading ? (
+                        <>
+                            <div className="spinner small" /> Processando...
+                        </>
+                    ) : (
+                        '📄 Subir Ato Normativo'
+                    )}
+                </button>
+                <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".pdf,.doc,.docx"
+                    style={{ display: 'none' }}
+                    onChange={handleFileSelect}
+                />
             </div>
         </div>
     );
