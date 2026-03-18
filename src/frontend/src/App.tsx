@@ -239,8 +239,6 @@ function App() {
                 rows={1}
               />
               <div className="chat-input-actions">
-                <button type="button" className="icon-btn" title="Anexar">🔗</button>
-                <button type="button" className="icon-btn" title="Bot">🤖</button>
                 <button
                   type="submit"
                   className="chat-submit-btn"
