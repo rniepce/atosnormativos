@@ -11,6 +11,7 @@ class SearchRequest(BaseModel):
     use_reranking: bool = Field(True, description="Use LLM to rerank results")
     prioritize_recency: bool = Field(False, description="Boost recent documents (2024-2025) in ranking")
     google_api_key: Optional[str] = Field(None, description="Optional Google AI Studio API key from frontend")
+    selected_model: Optional[str] = Field(None, description="Selected LLM model from the frontend")
 
 class SearchResultItem(BaseModel):
     document_id: int

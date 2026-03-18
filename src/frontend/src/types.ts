@@ -29,6 +29,7 @@ export interface SearchPayload {
   filter_tipo?: string;
   filter_ano?: number;
   google_api_key?: string;
+  selected_model?: string;
 }
 
 /** Response from POST /upload. */
@@ -53,6 +54,10 @@ export interface SidebarProps {
   setFilterStatus: (v: string) => void;
   filterTipo: string;
   setFilterTipo: (v: string) => void;
+  filterAno: string;
+  setFilterAno: (v: string) => void;
+  selectedModel: string;
+  setSelectedModel: (v: string) => void;
   uploadApiKey: string;
   setUploadApiKey: (v: string) => void;
   onClearChat: () => void;

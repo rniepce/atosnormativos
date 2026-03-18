@@ -1,11 +1,15 @@
-import React, { useState, useEffect, type ChangeEvent } from 'react';
-import type { SidebarProps, ModelInfo } from './types';
+import React, { useState, ChangeEvent } from 'react';
+import { SidebarProps } from './types';
 
 const Sidebar: React.FC<SidebarProps> = ({
     filterStatus,
     setFilterStatus,
     filterTipo,
     setFilterTipo,
+    filterAno,
+    setFilterAno,
+    selectedModel,
+    setSelectedModel,
     uploadApiKey,
     setUploadApiKey,
     onClearChat,
@@ -14,7 +18,9 @@ const Sidebar: React.FC<SidebarProps> = ({
     isOpen,
     onClose,
 }) => {
-    const [modelInfo, setModelInfo] = useState<ModelInfo>({ label: 'Carregando...', provider: '' });
+    const [isFiltrosOpen, setIsFiltrosOpen] = useState(false);
+    const [isModeloOpen, setIsModeloOpen] = useState(false);
+    
     const fileInputRef = React.useRef<HTMLInputElement>(null);
 
     const handleFileSelect = async (e: ChangeEvent<HTMLInputElement>): Promise<void> => {
@@ -29,15 +35,6 @@ const Sidebar: React.FC<SidebarProps> = ({
         onClearChat();
         onClose();
     };
-
-    const backendUrl = import.meta.env.PROD ? window.location.origin : (import.meta.env.VITE_BACKEND_URL || "http://localhost:8080");
-
-    useEffect(() => {
-        fetch(`${backendUrl}/api/model-info`)
-            .then(res => res.json())
-            .then((data: ModelInfo) => setModelInfo(data))
-            .catch(() => setModelInfo({ label: 'Indisponível', provider: 'none' }));
-    }, [backendUrl]);
 
     return (
         <div className={`sidebar ${isOpen ? 'open' : ''}`}>
@@ -56,33 +53,98 @@ const Sidebar: React.FC<SidebarProps> = ({
             <div style={{ display: "flex", flexDirection: "column", gap: "20px", marginTop: "1rem" }}>
                 
                 {/* Filtros */}
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: "12px", color: "#374151" }}>
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <line x1="4" y1="6" x2="20" y2="6"></line>
-                            <line x1="8" y1="12" x2="20" y2="12"></line>
-                            <line x1="12" y1="18" x2="20" y2="18"></line>
+                <div style={{ display: "flex", flexDirection: "column" }}>
+                    <div 
+                        style={{ display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", paddingBottom: isFiltrosOpen ? "12px" : "0" }}
+                        onClick={() => setIsFiltrosOpen(!isFiltrosOpen)}
+                    >
+                        <div style={{ display: "flex", alignItems: "center", gap: "12px", color: "#374151" }}>
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <line x1="4" y1="6" x2="20" y2="6"></line>
+                                <line x1="8" y1="12" x2="20" y2="12"></line>
+                                <line x1="12" y1="18" x2="20" y2="18"></line>
+                            </svg>
+                            <span style={{ fontWeight: 600, fontSize: "15px" }}>Filtros</span>
+                        </div>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ transform: isFiltrosOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>
+                            <polyline points="6 9 12 15 18 9"></polyline>
                         </svg>
-                        <span style={{ fontWeight: 500, fontSize: "15px" }}>Filtros</span>
                     </div>
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                    
+                    {isFiltrosOpen && (
+                        <div style={{ paddingLeft: "32px", display: "flex", flexDirection: "column", gap: "10px", paddingBottom: "10px" }}>
+                            <div className="form-group" style={{ margin: 0 }}>
+                                <label style={{ fontSize: "11px", color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Tipo de Ato</label>
+                                <select value={filterTipo} onChange={(e) => setFilterTipo(e.target.value)} style={{ padding: "6px" }}>
+                                    <option value="">Todos</option>
+                                    <option value="Portaria">Portaria</option>
+                                    <option value="Resolução">Resolução</option>
+                                    <option value="Provimento">Provimento</option>
+                                    <option value="Aviso">Aviso</option>
+                                </select>
+                            </div>
+                            <div className="form-group" style={{ margin: 0 }}>
+                                <label style={{ fontSize: "11px", color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Período / Ano</label>
+                                <input type="text" placeholder="Ex: 2023" value={filterAno} onChange={(e) => setFilterAno(e.target.value)} style={{ padding: "6px" }} />
+                            </div>
+                            <div className="form-group" style={{ margin: 0 }}>
+                                <label style={{ fontSize: "11px", color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Status</label>
+                                <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} style={{ padding: "6px" }}>
+                                    <option value="">Todos</option>
+                                    <option value="VIGENTE">VIGENTE</option>
+                                    <option value="REVOGADO">REVOGADO</option>
+                                </select>
+                            </div>
+                        </div>
+                    )}
                 </div>
 
                 <hr style={{ border: 0, borderTop: "1px solid #E5E7EB", margin: 0 }} />
 
                 {/* Modelo */}
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: "12px", color: "#374151" }}>
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <circle cx="12" cy="12" r="3"></circle>
-                            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-                        </svg>
-                        <div style={{ display: "flex", flexDirection: "column" }}>
-                            <span style={{ fontWeight: 500, fontSize: "15px" }}>Modelo</span>
-                            <span style={{ fontSize: "13px", color: "#6B7280" }}>{modelInfo.label}</span>
+                <div style={{ display: "flex", flexDirection: "column" }}>
+                    <div 
+                        style={{ display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", paddingBottom: isModeloOpen ? "12px" : "0" }}
+                        onClick={() => setIsModeloOpen(!isModeloOpen)}
+                    >
+                        <div style={{ display: "flex", alignItems: "center", gap: "12px", color: "#374151" }}>
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <circle cx="12" cy="12" r="3"></circle>
+                                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                            </svg>
+                            <div style={{ display: "flex", flexDirection: "column" }}>
+                                <span style={{ fontWeight: 600, fontSize: "15px" }}>Modelo</span>
+                                <span style={{ fontSize: "13px", color: "#6B7280" }}>{selectedModel}</span>
+                            </div>
                         </div>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ transform: isModeloOpen ? 'rotate(90deg)' : 'none', transition: 'transform 0.2s' }}>
+                            <polyline points="9 18 15 12 9 6"></polyline>
+                        </svg>
                     </div>
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                    {isModeloOpen && (
+                        <div style={{ paddingLeft: "32px", display: "flex", flexDirection: "column", gap: "8px", paddingBottom: "10px" }}>
+                            <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", cursor: "pointer" }}>
+                                <input 
+                                    type="radio" 
+                                    name="modelSelection" 
+                                    value="GPT 4.1 mini" 
+                                    checked={selectedModel === "GPT 4.1 mini"}
+                                    onChange={(e) => setSelectedModel(e.target.value)}
+                                />
+                                GPT 4.1 mini
+                            </label>
+                            <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", cursor: "pointer" }}>
+                                <input 
+                                    type="radio" 
+                                    name="modelSelection" 
+                                    value="GPT 5.2" 
+                                    checked={selectedModel === "GPT 5.2"}
+                                    onChange={(e) => setSelectedModel(e.target.value)}
+                                />
+                                GPT 5.2
+                            </label>
+                        </div>
+                    )}
                 </div>
 
                 <hr style={{ border: 0, borderTop: "1px solid #E5E7EB", margin: 0 }} />

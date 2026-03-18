@@ -13,6 +13,9 @@ function App() {
   // Sidebar states
   const [filterStatus, setFilterStatus] = useState('');
   const [filterTipo, setFilterTipo] = useState('');
+  const [filterAno, setFilterAno] = useState('');
+  const [selectedModel, setSelectedModel] = useState('GPT 4.1 mini');
+  
   const [uploadApiKey, setUploadApiKey] = useState<string>(() => {
     try { return localStorage.getItem('upload_api_key') || ''; } catch { return ''; }
   });
@@ -110,6 +113,8 @@ function App() {
 
       if (filterStatus) payload.filter_status = filterStatus;
       if (filterTipo) payload.filter_tipo = filterTipo;
+      if (filterAno && !isNaN(Number(filterAno))) payload.filter_ano = parseInt(filterAno, 10);
+      if (selectedModel) payload.selected_model = selectedModel;
 
       const response = await fetch(`${backendUrl}/search`, {
         method: 'POST',
@@ -170,6 +175,10 @@ function App() {
         setFilterStatus={setFilterStatus}
         filterTipo={filterTipo}
         setFilterTipo={setFilterTipo}
+        filterAno={filterAno}
+        setFilterAno={setFilterAno}
+        selectedModel={selectedModel}
+        setSelectedModel={setSelectedModel}
         uploadApiKey={uploadApiKey}
         setUploadApiKey={setUploadApiKey}
         onClearChat={clearChat}
