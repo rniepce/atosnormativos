@@ -14,7 +14,7 @@ function App() {
   const [filterStatus, setFilterStatus] = useState('');
   const [filterTipo, setFilterTipo] = useState('');
   const [filterAno, setFilterAno] = useState('');
-  const [selectedModel, setSelectedModel] = useState('GPT 4.1 mini');
+  const [selectedModel, setSelectedModel] = useState('GPT 5.4 mini');
   
   const [uploadApiKey, setUploadApiKey] = useState<string>(() => {
     try { return localStorage.getItem('upload_api_key') || ''; } catch { return ''; }

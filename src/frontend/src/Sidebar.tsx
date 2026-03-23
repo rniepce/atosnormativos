@@ -127,11 +127,11 @@ const Sidebar: React.FC<SidebarProps> = ({
                                 <input 
                                     type="radio" 
                                     name="modelSelection" 
-                                    value="GPT 4.1 mini" 
-                                    checked={selectedModel === "GPT 4.1 mini"}
+                                    value="GPT 5.4 mini" 
+                                    checked={selectedModel === "GPT 5.4 mini"}
                                     onChange={(e) => setSelectedModel(e.target.value)}
                                 />
-                                GPT 4.1 mini
+                                GPT 5.4 mini
                             </label>
                             <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", cursor: "pointer" }}>
                                 <input 
