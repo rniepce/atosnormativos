@@ -21,7 +21,6 @@ import logging
 import os
 import json
 import tempfile
-import magic
 
 # ── Structured Logging (CESEC §3) ───────────────────────────────
 LOG_FORMAT = '%(asctime)s | %(levelname)s | %(name)s | %(message)s'
@@ -136,16 +135,15 @@ async def upload_pdf(
         if len(content) > max_bytes:
             raise HTTPException(status_code=400, detail=f"Arquivo excede o limite de {MAX_UPLOAD_SIZE_MB}MB.")
 
-        # ── MIME type validation (CESEC §6) ──────────────────────
-        mime = magic.from_buffer(content[:2048], mime=True)
-        allowed_mimes = {
-            "application/pdf",
-            "application/msword",
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        }
-        if mime not in allowed_mimes:
-            logger.warning(f"upload_rejected | ip={client_ip} | filename={file.filename} | mime={mime}")
-            raise HTTPException(status_code=400, detail=f"Tipo de arquivo inválido (detectado: {mime}). Envie PDF ou DOCX.")
+        # ── MIME type validation via magic bytes + extensão ──────────
+        ext = Path(file.filename).suffix.lower() if file.filename else ""
+        magic_bytes = content[:8]
+        is_pdf  = magic_bytes[:4] == b"%PDF"
+        is_docx = magic_bytes[:4] == b"PK\x03\x04"  # ZIP (DOCX/XLSX)
+        is_doc  = magic_bytes[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"  # OLE2 (DOC)
+        if not (is_pdf or is_docx or is_doc) or ext not in (".pdf", ".docx", ".doc"):
+            logger.warning(f"upload_rejected | ip={client_ip} | filename={file.filename}")
+            raise HTTPException(status_code=400, detail="Tipo de arquivo inválido. Envie PDF, DOC ou DOCX.")
 
         # Save to temp file
         suffix = os.path.splitext(file.filename)[1]
