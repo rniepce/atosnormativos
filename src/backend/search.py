@@ -11,7 +11,7 @@ from src.backend.models import SearchRequest, SearchResultItem
 logger = logging.getLogger(__name__)
 
 # ── LLM Provider Configuration ──────────────────────────────────
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "google")  # "google", "ollama", or "azure"
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "azure")  # "google", "ollama", or "azure"
 
 # ── Ollama (Local) Configuration ────────────────────────────────
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
@@ -199,8 +199,7 @@ def _azure_generate(prompt: str, system_prompt: str = None) -> str:
     response = client.chat.completions.create(
         model=AZURE_LLM_MODEL,
         messages=messages,
-        max_tokens=2048,
-        temperature=0.4,
+        max_completion_tokens=2048,
     )
     return response.choices[0].message.content.strip()
 
