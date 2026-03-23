@@ -20,7 +20,7 @@ from dotenv import load_dotenv
 
 import google.generativeai as genai
 
-load_dotenv("/Users/rafaelpimentel/Downloads/atosnormativos/.env")
+load_dotenv(os.path.join(os.path.dirname(__file__), '..', '..', '.env'))
 
 # Configure logging
 logging.basicConfig(
@@ -302,7 +302,7 @@ async def main():
     logger.info(f"   Failed: {failed}")
     logger.info(f"   Skipped: {skipped}")
     logger.info(f"   Time: {total_time/60:.1f} min")
-    logger.info(f"   Rate: {success/(total_time/60):.1f} docs/min")
+    logger.info(f"   Rate: {success/(total_time/60):.1f} docs/min" if total_time > 0 else "   Rate: N/A")
     logger.info(f"   Failures: {FAILURE_LOG}")
     logger.info("=" * 60)
 

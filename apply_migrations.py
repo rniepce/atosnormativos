@@ -1,6 +1,7 @@
 """
 Script to apply database migrations for the new schema.
-Adds 'orgao' column and recreates chunks table with 384-dim vectors.
+Adds 'orgao' column and recreates chunks table with 1024-dim vectors
+(matching text-embedding-3-large via Azure OpenAI).
 """
 import asyncio
 import os
@@ -30,14 +31,14 @@ async def run_migrations():
         print("   ✓ Column added/exists")
         
         # Drop and recreate chunks table with correct vector dimension
-        print("2. Recreating chunks table with 384-dim vectors...")
+        print("2. Recreating chunks table with 1024-dim vectors...")
         await conn.execute("DROP TABLE IF EXISTS chunks CASCADE")
         await conn.execute("""
             CREATE TABLE chunks (
                 id SERIAL PRIMARY KEY,
                 documento_id INTEGER REFERENCES documentos(id) ON DELETE CASCADE,
                 conteudo_texto TEXT NOT NULL,
-                embedding vector(384)
+                embedding vector(1024)
             )
         """)
         print("   ✓ Chunks table recreated")

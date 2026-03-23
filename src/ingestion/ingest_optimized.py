@@ -11,17 +11,16 @@ os.environ["PYTORCH_MPS_HIGH_WATERMARK_RATIO"] = "0.0"
 import sys
 import asyncio
 import asyncpg
-import subprocess
 import time
-import re
 import logging
 from pathlib import Path
 from dotenv import load_dotenv
-from sentence_transformers import SentenceTransformer
-import numpy as np
+from openai import AzureOpenAI
+
+from src.ingestion.common import extract_text, chunk_text, build_metadata_from_path, get_embeddings
 
 # Load environment
-load_dotenv("/Users/rafaelpimentel/Downloads/atosnormativos/.env")
+load_dotenv(os.path.join(os.path.dirname(__file__), '..', '..', '.env'))
 
 # Configure logging
 logging.basicConfig(
@@ -35,41 +34,26 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ========== CONFIGURATION ==========
-SOURCE_DIR = Path("/Users/rafaelpimentel/Downloads/word")
+SOURCE_DIR = Path(os.getenv("SOURCE_DIR", str(Path(__file__).parent.parent.parent / "data")))
 MAX_CHUNKS_PER_DOC = 100  # Limit chunks per document
 EMBED_BATCH_SIZE = 16     # Small batches to prevent OOM
 MAX_DOC_LENGTH = 500000   # Skip docs larger than 500KB of text
 # ===================================
 
-# Load model
-logger.info("Loading BGE-large model...")
-model = SentenceTransformer("BAAI/bge-large-en-v1.5")
-logger.info(f"Model loaded! Dim: {model.get_sentence_embedding_dimension()}")
+# Initialize Azure OpenAI client for embeddings
+AZURE_API_KEY = os.getenv('AZURE_API_KEY')
+AZURE_ENDPOINT = os.getenv('AZURE_ENDPOINT', 'https://assistente-web-resource.cognitiveservices.azure.com/')
+AZURE_API_VERSION = os.getenv('AZURE_API_VERSION', '2025-01-01-preview')
+if not AZURE_API_KEY:
+    logger.error("AZURE_API_KEY not found in environment")
+    sys.exit(1)
 
-
-def extract_text(file_path, timeout=30):
-    try:
-        result = subprocess.run(
-            ["textutil", "-convert", "txt", "-stdout", str(file_path)],
-            capture_output=True, text=True, check=True, timeout=timeout
-        )
-        return result.stdout
-    except subprocess.TimeoutExpired:
-        logger.warning(f"Timeout extracting {file_path.name}")
-        return None
-    except Exception as e:
-        logger.warning(f"Error extracting {file_path.name}: {e}")
-        return None
-
-
-def chunk_text(text, chunk_size=1000, overlap=200):
-    chunks = []
-    start = 0
-    text = text.strip()
-    while start < len(text):
-        chunks.append(text[start:start+chunk_size].strip())
-        start += chunk_size - overlap
-    return [c for c in chunks if c]
+embedding_client = AzureOpenAI(
+    api_key=AZURE_API_KEY,
+    azure_endpoint=AZURE_ENDPOINT,
+    api_version=AZURE_API_VERSION,
+)
+logger.info("Azure OpenAI embedding client initialized (text-embedding-3-large, 1024-dim)")
 
 
 def smart_sample_chunks(chunks, max_chunks=MAX_CHUNKS_PER_DOC):
@@ -81,35 +65,14 @@ def smart_sample_chunks(chunks, max_chunks=MAX_CHUNKS_PER_DOC):
     return chunks[:half] + chunks[-half:]
 
 
-def extract_metadata(file_path):
-    folder = file_path.parent.name
-    filename = file_path.stem.lower()
-    metadata = {
-        "tipo": folder[:199], 
-        "numero": "0", 
-        "ano": 0, 
-        "orgao": "TJMG", 
-        "status": "VIGENTE", 
-        "assunto_resumo": folder, 
-        "tags": []
-    }
-    match = re.search(r"(\d{3,5})(\d{4})$", filename)
-    if match:
-        metadata["numero"] = str(int(match.group(1)))
-        year = int(match.group(2))
-        if 1900 <= year <= 2030:
-            metadata["ano"] = year
-    return metadata
-
-
 def embed_in_batches(chunks):
-    """Embed chunks in small batches to prevent MPS OOM."""
+    """Embed chunks in small batches via Azure OpenAI."""
     all_embeddings = []
     for i in range(0, len(chunks), EMBED_BATCH_SIZE):
         batch = chunks[i:i+EMBED_BATCH_SIZE]
-        embs = model.encode(batch, show_progress_bar=False, normalize_embeddings=True)
+        embs = get_embeddings(batch, embedding_client)
         all_embeddings.extend(embs)
-    return np.array(all_embeddings)
+    return all_embeddings
 
 
 async def main():
@@ -171,7 +134,7 @@ async def main():
                 continue
 
             # 2. Chunk with smart sampling
-            meta = extract_metadata(file_path)
+            meta = build_metadata_from_path(file_path)
             all_chunks = chunk_text(text)
             chunks = smart_sample_chunks(all_chunks)
             

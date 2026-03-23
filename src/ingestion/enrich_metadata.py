@@ -16,7 +16,7 @@ from src.utils.vertex import VertexAIClient
 from src.utils.db import get_db_connection
 
 # Load environment
-load_dotenv('/Users/rafaelpimentel/Downloads/atosnormativos/.env')
+load_dotenv(os.path.join(os.path.dirname(__file__), '..', '..', '.env'))
 
 # Configure logging
 logging.basicConfig(
@@ -30,7 +30,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Initialize Vertex AI
-print("Initializing Vertex AI Client...", flush=True)
+logger.info("Initializing Vertex AI Client...")
 vertex_client = VertexAIClient()
 
 async def get_document_text(conn, doc_id: int) -> str:
@@ -41,7 +41,7 @@ async def get_document_text(conn, doc_id: int) -> str:
     )
     return "\n".join([r['conteudo_texto'] for r in rows])
 
-async def generate_metadata(text: str) -> dict:
+async def generate_metadata(text: str) -> Optional[str]:
     """Use LLM to generate metadata."""
     prompt = f"""
     Analise o seguinte ato normativo e extraia as informações abaixo em formato JSON.
@@ -53,7 +53,7 @@ async def generate_metadata(text: str) -> dict:
     4. tags: Lista de 3-5 palavras-chave relevantes.
 
     Documento:
-    {text[:10000]}  # Limit context window just in case
+    {text[:10000]}
     
     Responda APENAS o JSON.
     """

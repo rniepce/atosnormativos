@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS chunks (
     id SERIAL PRIMARY KEY,
     documento_id INTEGER REFERENCES documentos(id) ON DELETE CASCADE,
     conteudo_texto TEXT NOT NULL, -- O trecho da lei
-    embedding vector(1024) -- O vetor gerado pelo BAAI/bge-m3 (1024-dim)
+    embedding vector(1024) -- O vetor gerado pelo text-embedding-3-large via Azure OpenAI (1024-dim)
 );
 
 -- Índices para performance

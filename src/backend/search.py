@@ -1,9 +1,11 @@
 import logging
 import os
+import time
+import contextvars
 from typing import List
 import httpx
 from openai import AzureOpenAI, OpenAI
-from src.utils.db import get_db_connection
+from src.utils.db import get_db_connection, release_db_connection
 from src.backend.models import SearchRequest, SearchResultItem
 
 logger = logging.getLogger(__name__)
@@ -32,19 +34,23 @@ AZURE_EMBEDDING_DIMENSIONS = int(os.getenv("AZURE_EMBEDDING_DIMENSIONS", "1024")
 _AZURE_CLIENT = None
 _GOOGLE_CLIENT = None
 _OLLAMA_AVAILABLE = None
-_REQUEST_GOOGLE_KEY = None  # Per-request API key from frontend
+_OLLAMA_CHECK_TIME = 0.0  # Timestamp of last Ollama check
+_OLLAMA_TTL = 300  # Re-check Ollama availability every 5 minutes
+
+# Per-request API key using ContextVar (safe for concurrent async requests)
+_REQUEST_GOOGLE_KEY: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    '_REQUEST_GOOGLE_KEY', default=None
+)
 
 
 def set_request_google_key(key: str):
     """Set a per-request Google API key (from frontend)."""
-    global _REQUEST_GOOGLE_KEY
-    _REQUEST_GOOGLE_KEY = key
+    _REQUEST_GOOGLE_KEY.set(key)
 
 
 def clear_request_google_key():
     """Clear the per-request Google API key."""
-    global _REQUEST_GOOGLE_KEY
-    _REQUEST_GOOGLE_KEY = None
+    _REQUEST_GOOGLE_KEY.set(None)
 
 
 def get_azure_client():
@@ -70,9 +76,10 @@ def get_google_client():
     """Initialize Google AI Studio client. Prefers per-request key from frontend."""
     global _GOOGLE_CLIENT
     # If a per-request key is provided, create a temporary client
-    if _REQUEST_GOOGLE_KEY:
+    per_request_key = _REQUEST_GOOGLE_KEY.get()
+    if per_request_key:
         return OpenAI(
-            api_key=_REQUEST_GOOGLE_KEY,
+            api_key=per_request_key,
             base_url=GOOGLE_BASE_URL,
         )
     # Otherwise use the cached env-var client
@@ -92,10 +99,12 @@ def get_google_client():
 
 
 def check_ollama_available() -> bool:
-    """Check if Ollama is running and the model is available."""
-    global _OLLAMA_AVAILABLE
-    if _OLLAMA_AVAILABLE is not None:
+    """Check if Ollama is running and the model is available (re-checks every 5 min)."""
+    global _OLLAMA_AVAILABLE, _OLLAMA_CHECK_TIME
+    now = time.time()
+    if _OLLAMA_AVAILABLE is not None and (now - _OLLAMA_CHECK_TIME) < _OLLAMA_TTL:
         return _OLLAMA_AVAILABLE
+    _OLLAMA_CHECK_TIME = now
     try:
         resp = httpx.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=3.0)
         if resp.status_code == 200:
@@ -115,7 +124,7 @@ def check_ollama_available() -> bool:
 
 def get_active_llm_info() -> dict:
     """Return info about the currently active LLM provider and model."""
-    if LLM_PROVIDER == "google" and (GOOGLE_API_KEY or _REQUEST_GOOGLE_KEY):
+    if LLM_PROVIDER == "google" and (GOOGLE_API_KEY or _REQUEST_GOOGLE_KEY.get()):
         return {"provider": "google", "model": GOOGLE_MODEL, "label": f"Gemma 3 12B (Google AI)"}
     elif LLM_PROVIDER == "google" and not GOOGLE_API_KEY:
         return {"provider": "google", "model": GOOGLE_MODEL, "label": f"Gemma 3 12B (chave necessária)", "needs_key": True}
@@ -263,7 +272,8 @@ EXEMPLOS:
 - "plantão" → "plantão judiciário noturno recesso habeas corpus urgência Portaria Conjunta Resolução escala"
 - "concurso" → "concurso público remoção promoção seleção vaga magistrado servidor cargo provimento Resolução Edital"
 
-Query original: {original_query}
+Query original:
+<user_query>{original_query}</user_query>
 
 Query expandida:"""
             rewritten = _llm_generate(prompt)
@@ -288,7 +298,8 @@ Query expandida:"""
 Retorne APENAS os números dos documentos mais relevantes, ordenados do mais ao menos relevante, separados por vírgula.
 Considere: (1) relevância semântica, (2) status de vigência (prefira VIGENTE), (3) especificidade.
 
-PERGUNTA: {query}
+PERGUNTA:
+<user_query>{query}</user_query>
 
 DOCUMENTOS:
 {docs_text}
@@ -477,7 +488,7 @@ ORDEM DE RELEVÂNCIA (números separados por vírgula):"""
             return results[:10]
 
         finally:
-            await conn.close()
+            await release_db_connection(conn)
 
     async def generate_answer(self, query: str, context: List[SearchResultItem]) -> str:
         """Generate answer using the active LLM provider."""
@@ -497,7 +508,8 @@ ORDEM DE RELEVÂNCIA (números separados por vírgula):"""
 DOCUMENTOS ENCONTRADOS:
 {context_text}
 
-PERGUNTA DO USUÁRIO: {query}
+PERGUNTA DO USUÁRIO:
+<user_query>{query}</user_query>
 
 INSTRUÇÕES PARA A RESPOSTA:
 1. Cite SEMPRE o tipo, número e ano dos atos normativos relevantes (ex: "Resolução nº 973/2021")

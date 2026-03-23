@@ -42,6 +42,7 @@ class DocumentClassifier:
         
         full_prompt = f"{prompt}\n\n{truncated_text}"
 
+        response_text = None
         try:
             response_text = self.vertex_client.generate_text(
                 prompt=full_prompt,

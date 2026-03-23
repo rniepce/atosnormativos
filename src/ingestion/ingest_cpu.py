@@ -1,23 +1,15 @@
 
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = ""
-os.environ["PYTORCH_MPS_HIGH_WATERMARK_RATIO"] = "0.0"
-
-import torch
-# Force CPU
-torch.set_default_device("cpu")
-
 import sys
 import asyncio
 import asyncpg
-import subprocess
 import time
-import re
 import logging
-import signal
 from pathlib import Path
 from dotenv import load_dotenv
-from sentence_transformers import SentenceTransformer
+from openai import AzureOpenAI
+
+from src.ingestion.common import extract_text, chunk_text, build_metadata_from_path, get_embeddings
 
 # Load environment
 load_dotenv(".env")
@@ -34,61 +26,22 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Timeout handler
-def handler(signum, frame):
-    raise TimeoutError("Operation timed out")
+# Initialize Azure OpenAI client for embeddings
+AZURE_API_KEY = os.getenv('AZURE_API_KEY')
+AZURE_ENDPOINT = os.getenv('AZURE_ENDPOINT', 'https://assistente-web-resource.cognitiveservices.azure.com/')
+AZURE_API_VERSION = os.getenv('AZURE_API_VERSION', '2025-01-01-preview')
+if not AZURE_API_KEY:
+    logger.error("AZURE_API_KEY not found in environment")
+    sys.exit(1)
 
-signal.signal(signal.SIGALRM, handler)
+embedding_client = AzureOpenAI(
+    api_key=AZURE_API_KEY,
+    azure_endpoint=AZURE_ENDPOINT,
+    api_version=AZURE_API_VERSION,
+)
+logger.info("Azure OpenAI embedding client initialized (text-embedding-3-large, 1024-dim)")
 
-# Load model
-logger.info("Loading model on CPU (this takes a moment)...")
-model = SentenceTransformer("BAAI/bge-large-en-v1.5", device="cpu")
-logger.info(f"Model loaded! Dim: {model.get_sentence_embedding_dimension()}")
-
-SOURCE_DIR = Path("/Users/rafaelpimentel/Downloads/word")
-
-def extract_text(file_path, timeout=30):
-    try:
-        result = subprocess.run(
-            ["textutil", "-convert", "txt", "-stdout", str(file_path)],
-            capture_output=True, text=True, check=True, timeout=timeout
-        )
-        return result.stdout
-    except subprocess.TimeoutExpired:
-        logger.warning(f"Timeout extracting text from {file_path.name}")
-        return None
-    except Exception as e:
-        logger.warning(f"Error extracting {file_path.name}: {e}")
-        return None
-
-def chunk_text(text, chunk_size=1000, overlap=200):
-    chunks = []
-    start = 0
-    text = text.strip()
-    while start < len(text):
-        chunks.append(text[start:start+chunk_size].strip())
-        start += chunk_size - overlap
-    return [c for c in chunks if c] or [text[:chunk_size]] if text else []
-
-def extract_metadata(file_path):
-    folder = file_path.parent.name
-    filename = file_path.stem.lower()
-    metadata = {
-        "tipo": folder[:199], 
-        "numero": "0", 
-        "ano": 0, 
-        "orgao": "TJMG", 
-        "status": "VIGENTE", 
-        "assunto_resumo": folder, 
-        "tags": []
-    }
-    match = re.search(r"(\d{3,5})(\d{4})$", filename)
-    if match:
-        metadata["numero"] = str(int(match.group(1)))
-        year = int(match.group(2))
-        if 1900 <= year <= 2030:
-            metadata["ano"] = year
-    return metadata
+SOURCE_DIR = Path(os.getenv("SOURCE_DIR", str(Path(__file__).parent.parent.parent / "data")))
 
 async def main():
     try:
@@ -143,7 +96,7 @@ async def main():
                 continue
             
             # 2. Chunk
-            meta = extract_metadata(file_path)
+            meta = build_metadata_from_path(file_path)
             chunks = chunk_text(text)
             logger.info(f"Chunked {file_path.name}: {len(chunks)} chunks")
             
@@ -151,25 +104,15 @@ async def main():
                 failed += 1
                 continue
 
-            # 3. Embed with Timeout
-            embeddings = []
+            # 3. Embed via Azure OpenAI
             try:
-                # Set timeout for embedding generation (2 mins max per doc)
                 logger.info(f"Embedding {file_path.name}...")
-                signal.alarm(120) 
-                embeddings = model.encode(chunks, show_progress_bar=False, normalize_embeddings=True)
-                signal.alarm(0) # Disable alarm
+                embeddings = get_embeddings(chunks, embedding_client)
                 logger.info(f"Embedded {file_path.name}!")
-            except TimeoutError:
-                logger.error(f"TIMEOUT embedding {file_path.name}")
-                failed += 1
-                continue
             except Exception as e:
                 logger.error(f"Error embedding {file_path.name}: {e}")
                 failed += 1
                 continue
-            finally:
-                signal.alarm(0)
 
             # 4. Save
             async with conn.transaction():

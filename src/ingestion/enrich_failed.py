@@ -18,7 +18,7 @@ from dotenv import load_dotenv
 
 import google.generativeai as genai
 
-load_dotenv("/Users/rafaelpimentel/Downloads/atosnormativos/.env")
+load_dotenv(os.path.join(os.path.dirname(__file__), '..', '..', '.env'))
 
 logging.basicConfig(
     level=logging.INFO,

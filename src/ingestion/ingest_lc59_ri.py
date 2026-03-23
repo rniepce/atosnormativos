@@ -22,7 +22,9 @@ from dotenv import load_dotenv
 load_dotenv(PROJECT_ROOT / '.env')
 
 import asyncpg
-from openai import AsyncOpenAI
+from openai import AsyncAzureOpenAI
+
+from src.ingestion.common import chunk_text, get_embeddings_async
 
 # Configure logging
 logging.basicConfig(
@@ -35,13 +37,19 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ── OpenAI setup ────────────────────────────────────────────────
-OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
-if not OPENAI_API_KEY:
-    print("❌ ERROR: OPENAI_API_KEY not found in environment")
+# ── Azure OpenAI setup ─────────────────────────────────────────
+AZURE_API_KEY = os.getenv('AZURE_API_KEY')
+AZURE_ENDPOINT = os.getenv('AZURE_ENDPOINT', 'https://assistente-web-resource.cognitiveservices.azure.com/')
+AZURE_API_VERSION = os.getenv('AZURE_API_VERSION', '2025-01-01-preview')
+if not AZURE_API_KEY:
+    logger.error("AZURE_API_KEY not found in environment")
     sys.exit(1)
 
-client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+client = AsyncAzureOpenAI(
+    api_key=AZURE_API_KEY,
+    azure_endpoint=AZURE_ENDPOINT,
+    api_version=AZURE_API_VERSION,
+)
 EMBEDDING_DIM = 1024  
 MODEL = "text-embedding-3-large"
 
@@ -54,36 +62,13 @@ def get_dsn() -> str:
     db = os.getenv("POSTGRES_DB", "railway")
     return f"postgresql://{user}:{password}@{host}:{port}/{db}"
 
-# ── Embeddings ──────────────────────────────────────────────────
-async def get_embeddings(texts: List[str]) -> List[List[float]]:
-    try:
-        response = await client.embeddings.create(
-            input=texts,
-            model=MODEL,
-            dimensions=EMBEDDING_DIM
-        )
-        return [data.embedding for data in response.data]
-    except Exception as e:
-        logger.error(f"Error getting embeddings: {e}")
-        raise e
-
-# ── Text chunking ───────────────────────────────────────────────
-def chunk_text(text: str, chunk_size: int = 1500, overlap: int = 200) -> List[str]:
-    chunks, start = [], 0
-    text = text.strip()
-    while start < len(text):
-        chunks.append(text[start:start + chunk_size].strip())
-        start += chunk_size - overlap
-    return [c for c in chunks if c]
+# ── Embeddings (delegated to common.get_embeddings_async) ─────
 
 def extract_pdf_text(pdf_path: Path) -> str:
     import fitz  # pymupdf
-    doc = fitz.open(str(pdf_path))
-    pages = []
-    for page in doc:
-        pages.append(page.get_text())
-    total_pages = len(doc)
-    doc.close()
+    with fitz.open(str(pdf_path)) as doc:
+        pages = [page.get_text() for page in doc]
+        total_pages = len(doc)
     full = "\n".join(pages)
     logger.info(f"Extracted {len(full):,} chars from {pdf_path.name} ({total_pages} pages)")
     return full
@@ -165,7 +150,7 @@ async def main():
             continue
 
         logger.info(f"📄 {label}: {len(text):,} chars")
-        chunks = chunk_text(text)
+        chunks = chunk_text(text, chunk_size=1500)
         logger.info(f"   → {len(chunks)} chunks")
 
         BATCH_SIZE = 50
@@ -173,7 +158,7 @@ async def main():
         for i in range(0, len(chunks), BATCH_SIZE):
             batch = chunks[i:i + BATCH_SIZE]
             logger.info(f"   → Embedding batch {i // BATCH_SIZE + 1}/{(len(chunks) - 1) // BATCH_SIZE + 1}")
-            embs = await get_embeddings(batch)
+            embs = await get_embeddings_async(batch, client)
             all_embeddings.extend(embs)
             await asyncio.sleep(0.05)
 

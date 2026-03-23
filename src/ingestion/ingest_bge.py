@@ -15,13 +15,13 @@ from typing import Set, Optional, List
 from dotenv import load_dotenv
 
 # Load environment
-load_dotenv('/Users/rafaelpimentel/Downloads/atosnormativos/.env')
+load_dotenv(os.path.join(os.path.dirname(__file__), '..', '..', '.env'))
 
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 from src.utils.db import get_db_connection
-
-from sentence_transformers import SentenceTransformer
+from src.ingestion.common import chunk_text, get_embeddings
+from openai import AzureOpenAI
 
 # Configure logging
 logging.basicConfig(
@@ -38,12 +38,22 @@ logger = logging.getLogger(__name__)
 FAILURE_LOG = "/tmp/ingestion_failures.log"
 
 # Source directory
-SOURCE_DIR = Path('/Users/rafaelpimentel/Downloads/word')
+SOURCE_DIR = Path(os.getenv("SOURCE_DIR", str(Path(__file__).parent.parent.parent / "data")))
 
-# Load BGE-large model (1024-dim, compatible with older PyTorch)
-print("Loading BGE-large model (this may take a minute)...", flush=True)
-model = SentenceTransformer('BAAI/bge-large-en-v1.5')
-print(f"✅ Model loaded! Embedding dim: {model.get_sentence_embedding_dimension()}", flush=True)
+# Initialize Azure OpenAI client for embeddings
+AZURE_API_KEY = os.getenv('AZURE_API_KEY')
+AZURE_ENDPOINT = os.getenv('AZURE_ENDPOINT', 'https://assistente-web-resource.cognitiveservices.azure.com/')
+AZURE_API_VERSION = os.getenv('AZURE_API_VERSION', '2025-01-01-preview')
+if not AZURE_API_KEY:
+    logging.error("AZURE_API_KEY not found in environment")
+    sys.exit(1)
+
+embedding_client = AzureOpenAI(
+    api_key=AZURE_API_KEY,
+    azure_endpoint=AZURE_ENDPOINT,
+    api_version=AZURE_API_VERSION,
+)
+logger.info("Azure OpenAI embedding client initialized (text-embedding-3-large, 1024-dim)")
 
 
 def log_failure(filename: str, reason: str):
@@ -52,6 +62,8 @@ def log_failure(filename: str, reason: str):
         f.write(f"{filename}|{reason}\n")
 
 
+# TODO: considerar migrar extract_text para common.py
+# (esta versao usa log_failure ao inves de logger.warning, comportamento diferente)
 def extract_text(file_path: Path, timeout: int = 30) -> Optional[str]:
     """Extract text from .doc/.docx using macOS textutil."""
     try:
@@ -68,6 +80,8 @@ def extract_text(file_path: Path, timeout: int = 30) -> Optional[str]:
         return None
 
 
+# TODO: considerar migrar extract_metadata_from_path para common.py
+# (esta versao possui mapeamento de orgao_patterns nao presente em common.build_metadata_from_path)
 def extract_metadata_from_path(file_path: Path) -> dict:
     """Extract metadata from file path."""
     folder_name = file_path.parent.name
@@ -114,16 +128,6 @@ def extract_metadata_from_path(file_path: Path) -> dict:
         metadata['orgao'] = 'TJMG'
     
     return metadata
-
-
-def chunk_text(text: str, chunk_size: int = 1000, overlap: int = 200) -> list:
-    """Text chunking with overlap."""
-    chunks, start = [], 0
-    text = text.strip()
-    while start < len(text):
-        chunks.append(text[start:start+chunk_size].strip())
-        start += chunk_size - overlap
-    return [c for c in chunks if c] or [text[:chunk_size]] if text else []
 
 
 async def get_existing_files(conn) -> Set[str]:
@@ -179,8 +183,8 @@ async def main():
             if not all_chunks:
                 return
 
-            # Generate embeddings locally
-            embeddings = model.encode(all_chunks, show_progress_bar=False, normalize_embeddings=True)
+            # Generate embeddings via Azure OpenAI
+            embeddings = get_embeddings(all_chunks, embedding_client)
             
             doc_embeddings = [[] for _ in batch_docs]
             for (doc_idx, _), emb in zip(chunk_map, embeddings):

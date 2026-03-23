@@ -1,7 +1,6 @@
 import sys
 import os
 import asyncio
-import subprocess
 import re
 import time
 import logging
@@ -12,8 +11,10 @@ from typing import Set
 from dotenv import load_dotenv
 load_dotenv()
 
-from sentence_transformers import SentenceTransformer
 import asyncpg
+from openai import AzureOpenAI
+
+from src.ingestion.common import extract_text, chunk_text, get_embeddings
 
 # Configure logging
 logging.basicConfig(
@@ -26,24 +27,23 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-print("Loading embedding model...", flush=True)
-model = SentenceTransformer('all-MiniLM-L6-v2')
-print("Model loaded!", flush=True)
+# Initialize Azure OpenAI client for embeddings
+AZURE_API_KEY = os.getenv('AZURE_API_KEY')
+AZURE_ENDPOINT = os.getenv('AZURE_ENDPOINT', 'https://assistente-web-resource.cognitiveservices.azure.com/')
+AZURE_API_VERSION = os.getenv('AZURE_API_VERSION', '2025-01-01-preview')
+if not AZURE_API_KEY:
+    logger.error("AZURE_API_KEY not found in environment")
+    sys.exit(1)
 
-def extract_text(file_path, timeout=30):
-    try:
-        result = subprocess.run(
-            ['textutil', '-convert', 'txt', '-stdout', str(file_path)],
-            capture_output=True, text=True, check=True, timeout=timeout
-        )
-        return result.stdout
-    except subprocess.TimeoutExpired:
-        logger.warning(f"Timeout extracting {file_path}")
-        return None
-    except Exception as e:
-        logger.warning(f"Error extracting {file_path}: {e}")
-        return None
+embedding_client = AzureOpenAI(
+    api_key=AZURE_API_KEY,
+    azure_endpoint=AZURE_ENDPOINT,
+    api_version=AZURE_API_VERSION,
+)
+logger.info("Azure OpenAI embedding client initialized (text-embedding-3-large, 1024-dim)")
 
+# TODO: considerar migrar classify_from_filename para common.py
+# (esta versao faz parsing especifico para Resolucao, diferente de common.build_metadata_from_path)
 def classify_from_filename(filename):
     name_lower = filename.lower()
     metadata = {'tipo': 'Resolução', 'numero': '0', 'ano': 0, 'status': 'VIGENTE', 'assunto_resumo': 'Resolução TJMG', 'tags': []}
@@ -52,14 +52,6 @@ def classify_from_filename(filename):
         metadata['numero'] = str(int(match.group(2)))
         metadata['ano'] = int(match.group(3))
     return metadata
-
-def chunk_text(text, chunk_size=1000, overlap=200):
-    chunks, start = [], 0
-    text = text.strip()
-    while start < len(text):
-        chunks.append(text[start:start+chunk_size].strip())
-        start += chunk_size - overlap
-    return [c for c in chunks if c] or [text[:chunk_size]] if text else []
 
 async def get_existing_files(conn) -> Set[str]:
     records = await conn.fetch("SELECT filename FROM documentos")
@@ -84,7 +76,7 @@ async def main():
     logger.info(f"Checking existing files... Found {len(existing_files)} already ingested.")
 
     # 2. List files to process
-    root_dir = Path('/Users/rafaelpimentel/Downloads/word/Resolução')
+    root_dir = Path(os.getenv("SOURCE_DIR", str(Path(__file__).parent.parent.parent / "data" / "Resolução")))
     all_files = [f for f in root_dir.iterdir() if f.suffix.lower() in ['.doc', '.docx'] and not f.name.startswith('~$')]
     
     files_to_process = [f for f in all_files if f.name not in existing_files]
@@ -110,7 +102,7 @@ async def main():
         chunks = chunk_text(text)
         
         try:
-            embeddings = model.encode(chunks, show_progress_bar=False)
+            embeddings = get_embeddings(chunks, embedding_client)
             
             async with conn.transaction():
                 doc_id = await conn.fetchval(

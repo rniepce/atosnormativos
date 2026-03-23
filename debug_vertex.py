@@ -5,7 +5,8 @@ from dotenv import load_dotenv
 from google.oauth2 import service_account
 import vertexai
 
-load_dotenv('/Users/rafaelpimentel/Downloads/atosnormativos/.env')
+from pathlib import Path
+load_dotenv(Path(__file__).parent / '.env')
 
 print(f"GCP_PROJECT_ID: {os.getenv('GCP_PROJECT_ID')}")
 print(f"GCP_LOCATION: {os.getenv('GCP_LOCATION')}")

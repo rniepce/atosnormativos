@@ -1,8 +1,6 @@
 import sys
-print("DEBUG: Script started", flush=True)
 import asyncio
 import os
-import sys
 from dotenv import load_dotenv
 from pathlib import Path
 

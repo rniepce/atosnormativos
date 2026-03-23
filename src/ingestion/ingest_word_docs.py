@@ -16,7 +16,9 @@ from dotenv import load_dotenv
 load_dotenv(PROJECT_ROOT / '.env')
 
 import asyncpg
-from openai import AsyncOpenAI
+from openai import AsyncAzureOpenAI
+
+from src.ingestion.common import chunk_text, get_embeddings_async
 
 # Configure logging
 logging.basicConfig(
@@ -29,13 +31,19 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ── OpenAI setup ────────────────────────────────────────────────
-OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
-if not OPENAI_API_KEY:
-    logger.error("❌ ERROR: OPENAI_API_KEY not found in environment")
+# ── Azure OpenAI setup ─────────────────────────────────────────
+AZURE_API_KEY = os.getenv('AZURE_API_KEY')
+AZURE_ENDPOINT = os.getenv('AZURE_ENDPOINT', 'https://assistente-web-resource.cognitiveservices.azure.com/')
+AZURE_API_VERSION = os.getenv('AZURE_API_VERSION', '2025-01-01-preview')
+if not AZURE_API_KEY:
+    logger.error("AZURE_API_KEY not found in environment")
     sys.exit(1)
 
-client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+client = AsyncAzureOpenAI(
+    api_key=AZURE_API_KEY,
+    azure_endpoint=AZURE_ENDPOINT,
+    api_version=AZURE_API_VERSION,
+)
 
 EMBEDDING_DIM = 1024  # Match database schema vector(1024)
 MODEL = "text-embedding-3-large"
@@ -80,33 +88,19 @@ async def init_db(conn):
             created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
         );
     """)
-    logger.info("✅ Database schema initialized.")
 
-# ── Embeddings ──────────────────────────────────────────────────
-async def get_embeddings(texts: List[str]) -> List[List[float]]:
-    """Get embeddings from OpenAI API with 1024 dimensions."""
-    try:
-        response = await client.embeddings.create(
-            input=texts,
-            model=MODEL,
-            dimensions=EMBEDDING_DIM
-        )
-        return [data.embedding for data in response.data]
-    except Exception as e:
-        logger.error(f"Error getting embeddings: {e}")
-        raise e
+    # Create HNSW index for fast approximate nearest neighbor search
+    await conn.execute("""
+        CREATE INDEX IF NOT EXISTS chunks_embedding_hnsw_idx
+        ON chunks USING hnsw (embedding vector_cosine_ops);
+    """)
+    logger.info("Database schema initialized (with HNSW index).")
 
-# ── Text chunking ───────────────────────────────────────────────
-def chunk_text(text: str, chunk_size: int = 1500, overlap: int = 200) -> List[str]:
-    """Split text into overlapping chunks."""
-    chunks, start = [], 0
-    text = text.strip()
-    while start < len(text):
-        chunks.append(text[start:start + chunk_size].strip())
-        start += chunk_size - overlap
-    return [c for c in chunks if c]
+# ── Embeddings (delegated to common.get_embeddings_async) ─────
 
 # ── Text & Metadata Extraction ──────────────────────────────────
+# TODO: considerar migrar extract_word_text para common.py
+# (esta versao nao possui timeout e usa errors='ignore', diferente de common.extract_text)
 def extract_word_text(filepath: Path) -> str:
     """Extract text from .doc or .docx using macOS textutil."""
     try:
@@ -122,10 +116,13 @@ def extract_word_text(filepath: Path) -> str:
         return ""
 
 def determine_status(text: str) -> str:
-    """Check if the document mentions 'revogad' intelligently."""
-    text_lower = text.lower()
-    # Broad check for revogation status (revogado, revogada, revogam-se)
-    if "revogad" in text_lower or "revogam-se" in text_lower:
+    """Check if the document header/ementa mentions revocation.
+
+    Only inspects the first 500 characters to avoid false positives from
+    documents that merely reference the revocation of *other* acts.
+    """
+    header = text[:500].lower()
+    if "revogad" in header or "revogam-se" in header:
         return "REVOGADO"
     return "VIGENTE"
 
@@ -187,7 +184,7 @@ async def process_file(conn, filepath: Path, base_folder: Path):
     status = determine_status(text)
 
     # Chunk text
-    chunks = chunk_text(text)
+    chunks = chunk_text(text, chunk_size=1500)
     
     # Generate embeddings in batches
     BATCH_SIZE = 50
@@ -196,7 +193,7 @@ async def process_file(conn, filepath: Path, base_folder: Path):
     for i in range(0, len(chunks), BATCH_SIZE):
         batch = chunks[i:i + BATCH_SIZE]
         try:
-            embs = await get_embeddings(batch)
+            embs = await get_embeddings_async(batch, client)
             all_embeddings.extend(embs)
             await asyncio.sleep(0.05)  # Be gentle with rate limits
         except Exception as e:
@@ -255,7 +252,7 @@ async def main():
     await init_db(conn)
 
     # Gather all word documents
-    base_folder = Path('/Users/danielabueno/Downloads/Word')
+    base_folder = Path(os.getenv("SOURCE_DIR", str(PROJECT_ROOT / "data")))
     word_docs = []
     for root, _, files in os.walk(base_folder):
         for f in files:

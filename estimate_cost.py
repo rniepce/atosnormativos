@@ -11,7 +11,7 @@ def get_text_docx(path):
             # very crude XML tag removal
             text = re.sub('<[^>]+>', ' ', xml_content)
             return text
-    except:
+    except Exception:
         return ""
 
 def get_text_doc(path):
@@ -19,10 +19,10 @@ def get_text_doc(path):
         # crude text extraction from binary .doc using strings
         result = subprocess.run(['strings', path], capture_output=True, text=True, errors='ignore')
         return result.stdout
-    except:
+    except Exception:
         return ""
 
-folder = '/Users/danielabueno/Downloads/Word'
+folder = os.getenv("SOURCE_DIR", ".")
 docs = []
 docxs = []
 

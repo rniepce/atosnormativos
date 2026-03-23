@@ -1,6 +1,7 @@
 from dotenv import load_dotenv
 load_dotenv()
 
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, UploadFile, File, Request, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -11,9 +12,11 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from starlette.responses import JSONResponse
 from src.backend.models import SearchRequest, SearchResponse
-from src.backend.search import SearchService, get_active_llm_info, set_request_google_key, clear_request_google_key
-from src.ingestion.extraction import extract_text_from_pdf
+from src.backend.search import SearchService, get_active_llm_info, set_request_google_key, clear_request_google_key, _llm_generate
+from src.ingestion.extraction import extract_text_from_pdf, extract_text_from_doc_docx
 from src.ingestion.storage import DocumentStorage
+from src.utils.db import init_pool, close_pool
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 import logging
 import os
 import json
@@ -21,15 +24,10 @@ import tempfile
 import magic
 
 # ── Structured Logging (CESEC §3) ───────────────────────────────
-LOG_FORMAT = json.dumps({
-    "time": "%(asctime)s",
-    "level": "%(levelname)s",
-    "module": "%(name)s",
-    "message": "%(message)s",
-})
+LOG_FORMAT = '%(asctime)s | %(levelname)s | %(name)s | %(message)s'
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s | %(levelname)s | %(name)s | %(message)s',
+    format=LOG_FORMAT,
     datefmt='%Y-%m-%dT%H:%M:%S%z',
 )
 logger = logging.getLogger(__name__)
@@ -43,7 +41,20 @@ UPLOAD_API_KEY = os.getenv("UPLOAD_API_KEY", "")
 CORS_ORIGINS = [o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:8080").split(",")]
 MAX_UPLOAD_SIZE_MB = int(os.getenv("MAX_UPLOAD_SIZE_MB", "50"))
 
-app = FastAPI(title="TJMG Normativos RAG API", version="1.0.0")
+MAX_BODY_SIZE = MAX_UPLOAD_SIZE_MB * 1024 * 1024  # bytes
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Startup: create DB pool. Shutdown: close it."""
+    await init_pool(min_size=2, max_size=10)
+    logger.info("DB connection pool initialized")
+    yield
+    await close_pool()
+    logger.info("DB connection pool closed")
+
+
+app = FastAPI(title="TJMG Normativos RAG API", version="1.0.0", lifespan=lifespan)
 app.state.limiter = limiter
 
 # Rate limit error handler
@@ -142,13 +153,21 @@ async def upload_pdf(
             tmp.write(content)
             tmp_path = tmp.name
 
-        # 1. Extract text
-        text = extract_text_from_pdf(tmp_path)
-        if not text:
-            raise HTTPException(status_code=400, detail="Não foi possível extrair texto do arquivo.")
+        try:
+            # 1. Extract text — choose extractor based on file extension
+            lower_suffix = suffix.lower()
+            if lower_suffix == ".pdf":
+                text = extract_text_from_pdf(tmp_path)
+            elif lower_suffix in (".doc", ".docx"):
+                text = extract_text_from_doc_docx(tmp_path)
+            else:
+                text = None
 
-        # 2. Classify using Azure LLM
-        classify_prompt = f"""Você é um classificador jurídico especializado em atos normativos do TJMG.
+            if not text:
+                raise HTTPException(status_code=400, detail="Não foi possível extrair texto do arquivo.")
+
+            # 2. Classify using Azure LLM
+            classify_prompt = f"""Você é um classificador jurídico especializado em atos normativos do TJMG.
 Analise o texto abaixo e extraia os metadados em formato JSON:
 {{
   "tipo": "Portaria|Resolução|Provimento|Portaria Conjunta|Aviso|Ordem de Serviço|Outro",
@@ -161,68 +180,68 @@ Analise o texto abaixo e extraia os metadados em formato JSON:
 }}
 
 Texto (primeiros 10.000 caracteres):
-{text[:10000]}
+<user_query>{text[:10000]}</user_query>
 
 Responda APENAS com JSON válido:"""
 
-        try:
-            metadata_text = _llm_generate(classify_prompt)
-            metadata_text = metadata_text.replace("```json", "").replace("```", "").strip()
-            metadata = json.loads(metadata_text)
-        except Exception as e:
-            logger.warning(f"classification_failed | filename={file.filename} | error={e}")
-            metadata = {
-                "tipo": "Desconhecido", "numero": "0", "ano": 0,
-                "orgao": "Desconhecido", "status": "VIGENTE",
-                "assunto_resumo": "Classificação pendente", "tags": []
-            }
+            try:
+                metadata_text = _llm_generate(classify_prompt)
+                metadata_text = metadata_text.replace("```json", "").replace("```", "").strip()
+                metadata = json.loads(metadata_text)
+            except Exception as e:
+                logger.warning(f"classification_failed | filename={file.filename} | error={e}")
+                metadata = {
+                    "tipo": "Desconhecido", "numero": "0", "ano": 0,
+                    "orgao": "Desconhecido", "status": "VIGENTE",
+                    "assunto_resumo": "Classificação pendente", "tags": []
+                }
 
-        # 3. Chunk text with legal separators
-        from langchain_text_splitters import RecursiveCharacterTextSplitter
-        splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000, chunk_overlap=200,
-            separators=["\nCAPÍTULO", "\nSeção", "\nArt.", "\nParágrafo", "\n§", "\n\n", "\n", " "]
-        )
-        raw_chunks = splitter.split_text(text)
-
-        # 4. Embed with Azure (same model as search)
-        from src.backend.search import get_azure_client, AZURE_EMBEDDING_MODEL, AZURE_EMBEDDING_DIMENSIONS
-        azure_client = get_azure_client()
-        if azure_client is None:
-            raise HTTPException(status_code=500, detail="Serviço de embeddings indisponível.")
-
-        chunks = []
-        for i in range(0, len(raw_chunks), 100):
-            batch = raw_chunks[i:i+100]
-            response = azure_client.embeddings.create(
-                input=batch, model=AZURE_EMBEDDING_MODEL, dimensions=AZURE_EMBEDDING_DIMENSIONS
+            # 3. Chunk text with legal separators
+            splitter = RecursiveCharacterTextSplitter(
+                chunk_size=1000, chunk_overlap=200,
+                separators=["\nCAPÍTULO", "\nSeção", "\nArt.", "\nParágrafo", "\n§", "\n\n", "\n", " "]
             )
-            for j, emb_data in enumerate(response.data):
-                chunks.append({
-                    "conteudo_texto": batch[j],
-                    "embedding": emb_data.embedding
-                })
+            raw_chunks = splitter.split_text(text)
 
-        # 5. Store in database
-        storage = DocumentStorage()
-        await storage.save_document_and_chunks(
-            filename=file.filename,
-            gcs_uri="",
-            metadata=metadata,
-            chunks=chunks
-        )
+            # 4. Embed with Azure (same model as search)
+            from src.backend.search import get_azure_client, AZURE_EMBEDDING_MODEL, AZURE_EMBEDDING_DIMENSIONS
+            azure_client = get_azure_client()
+            if azure_client is None:
+                raise HTTPException(status_code=500, detail="Serviço de embeddings indisponível.")
 
-        # Cleanup temp file
-        os.unlink(tmp_path)
+            chunks = []
+            for i in range(0, len(raw_chunks), 100):
+                batch = raw_chunks[i:i+100]
+                response = azure_client.embeddings.create(
+                    input=batch, model=AZURE_EMBEDDING_MODEL, dimensions=AZURE_EMBEDDING_DIMENSIONS
+                )
+                for j, emb_data in enumerate(response.data):
+                    chunks.append({
+                        "conteudo_texto": batch[j],
+                        "embedding": emb_data.embedding
+                    })
 
-        logger.info(f"upload_success | ip={client_ip} | filename={file.filename} | chunks={len(chunks)}")
+            # 5. Store in database
+            storage = DocumentStorage()
+            await storage.save_document_and_chunks(
+                filename=file.filename,
+                gcs_uri="",
+                metadata=metadata,
+                chunks=chunks
+            )
 
-        return {
-            "status": "success",
-            "filename": file.filename,
-            "metadata": metadata,
-            "chunks_created": len(chunks)
-        }
+            logger.info(f"upload_success | ip={client_ip} | filename={file.filename} | chunks={len(chunks)}")
+
+            return {
+                "status": "success",
+                "filename": file.filename,
+                "metadata": metadata,
+                "chunks_created": len(chunks)
+            }
+        finally:
+            # Always clean up temp file, even on exception
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
 
     except HTTPException:
         raise

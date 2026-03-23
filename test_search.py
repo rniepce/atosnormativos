@@ -5,7 +5,8 @@ from src.backend.models import SearchRequest
 from dotenv import load_dotenv
 
 # Load env variables (for DB connection)
-load_dotenv('/Users/rafaelpimentel/Downloads/atosnormativos/.env')
+from pathlib import Path
+load_dotenv(Path(__file__).parent / '.env')
 
 async def test_search():
     print("Initializing Search Service...")

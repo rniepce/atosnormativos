@@ -15,8 +15,10 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
-from sentence_transformers import SentenceTransformer
 import asyncpg
+from openai import AzureOpenAI
+
+from src.ingestion.common import extract_text, chunk_text, get_embeddings
 
 # Configure logging
 logging.basicConfig(
@@ -25,45 +27,24 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Initialize local embedding model
-EMBEDDING_MODEL = None
+# Initialize Azure OpenAI client for embeddings
+AZURE_API_KEY = os.getenv('AZURE_API_KEY')
+AZURE_ENDPOINT = os.getenv('AZURE_ENDPOINT', 'https://assistente-web-resource.cognitiveservices.azure.com/')
+AZURE_API_VERSION = os.getenv('AZURE_API_VERSION', '2025-01-01-preview')
+if not AZURE_API_KEY:
+    logger.error("AZURE_API_KEY not found in environment")
+    import sys; sys.exit(1)
 
-def get_embedding_model():
-    global EMBEDDING_MODEL
-    if EMBEDDING_MODEL is None:
-        print("Loading embedding model...", flush=True)
-        EMBEDDING_MODEL = SentenceTransformer('all-MiniLM-L6-v2')
-        print("Embedding model loaded!", flush=True)
-    return EMBEDDING_MODEL
+embedding_client = AzureOpenAI(
+    api_key=AZURE_API_KEY,
+    azure_endpoint=AZURE_ENDPOINT,
+    api_version=AZURE_API_VERSION,
+)
+logger.info("Azure OpenAI embedding client initialized (text-embedding-3-large, 1024-dim)")
 
-def extract_text_from_doc_docx(file_path: str) -> Optional[str]:
-    """Extract text from .doc/.docx using macOS textutil."""
-    import subprocess
-    import shutil
-    
-    if not shutil.which("textutil"):
-        logger.error("textutil not found. This function requires macOS.")
-        return None
-
-    try:
-        result = subprocess.run(
-            ["textutil", "-convert", "txt", "-stdout", file_path],
-            capture_output=True,
-            text=True,
-            check=True,
-            timeout=30
-        )
-        return result.stdout
-    except subprocess.TimeoutExpired:
-        logger.error(f"Timeout extracting text from {file_path}")
-        return None
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Error converting {file_path}: {e}")
-        return None
-    except Exception as e:
-        logger.error(f"Unexpected error processing {file_path}: {e}")
-        return None
-
+# TODO: considerar migrar classify_from_filename para common.py
+# (esta versao faz parsing especifico por tipo de ato com logica adicional de parent_dir,
+#  diferente de common.build_metadata_from_path)
 def classify_from_filename(filename: str, parent_dir: str) -> Dict[str, Any]:
     """Extract metadata from filename and directory."""
     name_lower = filename.lower()
@@ -132,21 +113,6 @@ def classify_from_filename(filename: str, parent_dir: str) -> Dict[str, Any]:
     
     return metadata
 
-def chunk_text(text: str, chunk_size: int = 1000, overlap: int = 200) -> List[str]:
-    """Simple text chunking with overlap."""
-    chunks = []
-    start = 0
-    text = text.strip()
-    
-    while start < len(text):
-        end = start + chunk_size
-        chunk = text[start:end]
-        if chunk.strip():
-            chunks.append(chunk.strip())
-        start = end - overlap
-    
-    return chunks if chunks else [text[:chunk_size]] if text else []
-
 async def get_db_connection():
     """Get database connection using environment variables."""
     return await asyncpg.connect(
@@ -162,30 +128,30 @@ async def get_processed_filenames(conn) -> Set[str]:
     rows = await conn.fetch("SELECT filename FROM documentos")
     return {row['filename'] for row in rows}
 
-async def process_file(file_path: Path, model: SentenceTransformer, conn) -> bool:
+async def process_file(file_path: Path, conn) -> bool:
     """Process a single file: extract text, classify, chunk, embed, store."""
     filename = file_path.name
     logger.info(f"Processing: {filename}")
-    
+
     # 1. Extract Text
-    text = extract_text_from_doc_docx(str(file_path))
+    text = extract_text(file_path)
     if not text or len(text.strip()) < 50:
         logger.warning(f"Skipping {filename}: No text extracted or too short.")
         return False
-    
+
     # 2. Classify from filename
     metadata = classify_from_filename(filename, file_path.parent.name)
     logger.info(f"  Classified as: {metadata['tipo']} {metadata['numero']}/{metadata['ano']}")
-    
+
     # 3. Chunk the text (limit to prevent memory issues)
     chunks = chunk_text(text)
     if len(chunks) > 500:
         logger.warning(f"  Document has {len(chunks)} chunks, limiting to 500")
         chunks = chunks[:500]
     logger.info(f"  Created {len(chunks)} chunks")
-    
-    # 4. Generate embeddings
-    embeddings = model.encode(chunks, show_progress_bar=False)
+
+    # 4. Generate embeddings via Azure OpenAI
+    embeddings = get_embeddings(chunks, embedding_client)
     
     # 5. Store in database
     try:
@@ -236,9 +202,6 @@ async def main():
         print(f"Directory not found: {root_dir}")
         return
 
-    # Load embedding model
-    model = get_embedding_model()
-    
     # Get database connection
     try:
         conn = await get_db_connection()
@@ -285,7 +248,7 @@ async def main():
             logger.info(f"Reconnecting to database (every {batch_size} files)...")
             try:
                 await conn.close()
-            except:
+            except Exception:
                 pass
             try:
                 conn = await get_db_connection()
@@ -293,10 +256,10 @@ async def main():
             except Exception as e:
                 logger.error(f"Failed to reconnect: {e}")
                 break
-        
+
         logger.info(f"[{i}/{len(files_to_process)}] Processing {file_path.name}")
         try:
-            if await process_file(file_path, model, conn):
+            if await process_file(file_path, conn):
                 success += 1
             else:
                 failed += 1
@@ -306,7 +269,7 @@ async def main():
             # Try to reconnect on error
             try:
                 await conn.close()
-            except:
+            except Exception:
                 pass
             try:
                 conn = await get_db_connection()
@@ -314,10 +277,10 @@ async def main():
             except Exception as e2:
                 logger.error(f"Failed to reconnect after error: {e2}")
                 break
-    
+
     try:
         await conn.close()
-    except:
+    except Exception:
         pass
     
     logger.info(f"\n{'='*50}")

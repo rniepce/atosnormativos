@@ -99,8 +99,6 @@ async def process_file(
     # Actually, the classifier `classify_document` takes text. 
     # Let's trust the classifier mainly, but maybe prepend the filename info to the text context?
     
-    context_text = f"Nome do arquivo: {filename}\nDiretório: {file_path.parent.name}\n\n{text[:20000]}" # Truncate for classification to save tokens if huge
-    
     try:
         # Note: classifier.classify_document might need the full text for better context, 
         # but let's pass the first chunk + file info to save time/cost.

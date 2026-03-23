@@ -5,7 +5,6 @@ Uses google-generativeai SDK with API Key.
 import sys
 import os
 import asyncio
-import subprocess
 import re
 import time
 import logging
@@ -14,21 +13,14 @@ from typing import Set, Optional, List
 from dotenv import load_dotenv
 
 # Load environment
-load_dotenv('/Users/rafaelpimentel/Downloads/atosnormativos/.env')
+load_dotenv(os.path.join(os.path.dirname(__file__), '..', '..', '.env'))
 
-import google.generativeai as genai
-
-# Configure Gemini
-GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
-if not GEMINI_API_KEY:
-    print("ERROR: GEMINI_API_KEY not found in environment")
-    sys.exit(1)
-
-genai.configure(api_key=GEMINI_API_KEY)
+from openai import AzureOpenAI
 
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 from src.utils.db import get_db_connection
+from src.ingestion.common import extract_text, chunk_text, get_embeddings
 
 # Configure logging
 logging.basicConfig(
@@ -42,48 +34,26 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Source directory
-SOURCE_DIR = Path('/Users/rafaelpimentel/Downloads/word')
+SOURCE_DIR = Path(os.getenv("SOURCE_DIR", str(Path(__file__).parent.parent.parent / "data")))
 
-# Test embedding
-print("Testing Gemini Embedding API...", flush=True)
-try:
-    test_result = genai.embed_content(
-        model="models/gemini-embedding-001",
-        content="test",
-        task_type="retrieval_document"
-    )
-    print(f"✅ Gemini ready! Embedding dim: {len(test_result['embedding'])}", flush=True)
-except Exception as e:
-    print(f"❌ Failed to test Gemini: {e}", flush=True)
+# Initialize Azure OpenAI client for embeddings
+AZURE_API_KEY = os.getenv('AZURE_API_KEY')
+AZURE_ENDPOINT = os.getenv('AZURE_ENDPOINT', 'https://assistente-web-resource.cognitiveservices.azure.com/')
+AZURE_API_VERSION = os.getenv('AZURE_API_VERSION', '2025-01-01-preview')
+if not AZURE_API_KEY:
+    logging.error("AZURE_API_KEY not found in environment")
     sys.exit(1)
 
-
-def get_embeddings(texts: List[str]) -> List[List[float]]:
-    """Get embeddings from Gemini API."""
-    result = genai.embed_content(
-        model="models/gemini-embedding-001",
-        content=texts,
-        task_type="retrieval_document"
-    )
-    return result['embedding']
+embedding_client = AzureOpenAI(
+    api_key=AZURE_API_KEY,
+    azure_endpoint=AZURE_ENDPOINT,
+    api_version=AZURE_API_VERSION,
+)
+logger.info("Azure OpenAI embedding client initialized (text-embedding-3-large, 1024-dim)")
 
 
-def extract_text(file_path: Path, timeout: int = 30) -> Optional[str]:
-    """Extract text from .doc/.docx using macOS textutil."""
-    try:
-        result = subprocess.run(
-            ['textutil', '-convert', 'txt', '-stdout', str(file_path)],
-            capture_output=True, text=True, check=True, timeout=timeout
-        )
-        return result.stdout
-    except subprocess.TimeoutExpired:
-        logger.warning(f"Timeout extracting {file_path}")
-        return None
-    except Exception as e:
-        logger.warning(f"Error extracting {file_path}: {e}")
-        return None
-
-
+# TODO: considerar migrar extract_metadata_from_path para common.py
+# (esta versao possui mapeamento de orgao_patterns nao presente em common.build_metadata_from_path)
 def extract_metadata_from_path(file_path: Path) -> dict:
     """Extract metadata from file path."""
     folder_name = file_path.parent.name
@@ -130,16 +100,6 @@ def extract_metadata_from_path(file_path: Path) -> dict:
         metadata['orgao'] = 'TJMG'
     
     return metadata
-
-
-def chunk_text(text: str, chunk_size: int = 1500, overlap: int = 200) -> list:
-    """Text chunking with overlap."""
-    chunks, start = [], 0
-    text = text.strip()
-    while start < len(text):
-        chunks.append(text[start:start+chunk_size].strip())
-        start += chunk_size - overlap
-    return [c for c in chunks if c] or [text[:chunk_size]] if text else []
 
 
 async def get_existing_files(conn) -> Set[str]:
@@ -192,7 +152,7 @@ async def main():
             if not all_chunks:
                 return
 
-            embeddings = get_embeddings(all_chunks)
+            embeddings = get_embeddings(all_chunks, embedding_client)
             
             doc_embeddings = [[] for _ in batch_docs]
             for (doc_idx, _), emb in zip(chunk_map, embeddings):
@@ -251,8 +211,8 @@ async def main():
             continue
 
         metadata = extract_metadata_from_path(file_path)
-        chunks = chunk_text(text)
-        
+        chunks = chunk_text(text, chunk_size=1500)
+
         current_batch.append((file_path, metadata, text, chunks))
         
         if len(current_batch) >= BATCH_SIZE:

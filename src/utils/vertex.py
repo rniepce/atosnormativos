@@ -8,6 +8,9 @@ from vertexai.language_models import TextEmbeddingInput, TextEmbeddingModel
 
 from google.oauth2 import service_account
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Initialize Vertex AI
 PROJECT_ID = os.getenv("GCP_PROJECT_ID")
@@ -20,7 +23,7 @@ if CREDENTIALS_JSON:
         service_account_info = json.loads(CREDENTIALS_JSON)
         credentials = service_account.Credentials.from_service_account_info(service_account_info)
     except json.JSONDecodeError as e:
-        print(f"Error decoding GOOGLE_CREDENTIALS_JSON: {e}")
+        logger.error(f"Error decoding GOOGLE_CREDENTIALS_JSON: {e}")
 
 if PROJECT_ID:
     vertexai.init(project=PROJECT_ID, location=LOCATION, credentials=credentials)

@@ -5,7 +5,6 @@ google-auth
 google-generativeai
 asyncpg
 pgvector
-sqlalchemy
 langchain-text-splitters
 pymupdf
 python-dotenv
@@ -17,4 +16,4 @@ openai
 httpx
 google-cloud-aiplatform
 slowapi
-python-magic
+python-docx

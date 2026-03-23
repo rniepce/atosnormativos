@@ -3,15 +3,12 @@ FAST Ingestion Script - Highly Optimized
 =========================================
 Optimizations:
 1. Multiprocessing for text extraction (CPU-bound)
-2. Large batch encoding with MPS memory management
+2. Large batch encoding via Azure OpenAI text-embedding-3-large
 3. Async DB writes with connection pooling
 4. Smart chunking (larger chunks = fewer embeddings)
 5. Progress persistence (resume on crash)
 """
 import os
-os.environ["PYTORCH_MPS_HIGH_WATERMARK_RATIO"] = "0.0"
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
-
 import sys
 import asyncio
 import asyncpg
@@ -19,15 +16,15 @@ import subprocess
 import time
 import re
 import logging
-import gc
-import torch
 from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dotenv import load_dotenv
-from sentence_transformers import SentenceTransformer
+from openai import AzureOpenAI
+
+from src.ingestion.common import build_metadata_from_path, get_embeddings
 
 # Load environment
-load_dotenv("/Users/rafaelpimentel/Downloads/atosnormativos/.env")
+load_dotenv(os.path.join(os.path.dirname(__file__), '..', '..', '.env'))
 
 # Logging
 logging.basicConfig(
@@ -41,7 +38,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ============= CONFIGURATION =============
-SOURCE_DIR = Path("/Users/rafaelpimentel/Downloads/word")
+SOURCE_DIR = Path(os.getenv("SOURCE_DIR", str(Path(__file__).parent.parent.parent / "data")))
 CHUNK_SIZE = 1500          # Larger chunks = fewer embeddings
 CHUNK_OVERLAP = 300
 EMBED_BATCH = 64           # Larger batches for MPS efficiency
@@ -50,6 +47,8 @@ MAX_CHUNKS_PER_DOC = 200   # Limit for huge docs
 # ==========================================
 
 
+# TODO: considerar migrar para common.py
+# (esta versao roda em process pool, diferente de common.extract_text)
 def extract_single_file(file_path_str: str) -> tuple:
     """Extract text from a single file (runs in subprocess pool)."""
     file_path = Path(file_path_str)
@@ -68,6 +67,8 @@ def extract_single_file(file_path_str: str) -> tuple:
         return (file_path_str, None, str(e)[:50])
 
 
+# TODO: considerar migrar para common.py
+# (esta versao usa constantes de modulo CHUNK_SIZE/CHUNK_OVERLAP e faz head+tail sampling)
 def chunk_text(text: str) -> list:
     """Chunk text with larger size for efficiency."""
     chunks = []
@@ -86,46 +87,16 @@ def chunk_text(text: str) -> list:
     return chunks
 
 
-def extract_metadata(file_path: Path) -> dict:
-    """Extract metadata from filename and folder."""
-    folder = file_path.parent.name
-    filename = file_path.stem.lower()
-    
-    metadata = {
-        "tipo": folder[:199],
-        "numero": "0",
-        "ano": 0,
-        "orgao": "TJMG",
-        "status": "VIGENTE",
-        "assunto_resumo": folder,
-        "tags": []
-    }
-    
-    # Try to extract number/year
-    patterns = [
-        r"(\d{3,5})(\d{4})$",
-        r"(\d{1,4})[_\-](\d{4})",
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, filename)
-        if match:
-            metadata["numero"] = str(int(match.group(1)))
-            year = int(match.group(2))
-            if 1900 <= year <= 2030:
-                metadata["ano"] = year
-            break
-    
-    return metadata
-
-
 async def main():
     start_total = time.time()
-    
-    # Load model
-    logger.info("🚀 Loading BGE-large model...")
-    device = "mps" if torch.backends.mps.is_available() else "cpu"
-    model = SentenceTransformer("BAAI/bge-large-en-v1.5", device=device)
-    logger.info(f"✅ Model loaded on {device.upper()}! Dim: {model.get_sentence_embedding_dimension()}")
+
+    # Azure OpenAI client
+    client = AzureOpenAI(
+        api_key=os.getenv("AZURE_API_KEY"),
+        api_version=os.getenv("AZURE_API_VERSION", "2024-02-01"),
+        azure_endpoint=os.getenv("AZURE_ENDPOINT"),
+    )
+    logger.info("✅ Azure OpenAI client ready (text-embedding-3-large, 1024-dim)")
     
     # DB Connection
     try:
@@ -195,7 +166,7 @@ async def main():
     
     for file_path, text in extracted_docs:
         chunks = chunk_text(text)
-        metadata = extract_metadata(file_path)
+        metadata = build_metadata_from_path(file_path)
         doc_chunk_counts[file_path] = len(chunks)
         
         for idx, chunk_content in enumerate(chunks):
@@ -212,22 +183,17 @@ async def main():
     for batch_start in range(0, total_chunks, EMBED_BATCH):
         batch_end = min(batch_start + EMBED_BATCH, total_chunks)
         batch_texts = [c[2] for c in all_chunks[batch_start:batch_end]]
-        
-        batch_embs = model.encode(batch_texts, show_progress_bar=False, normalize_embeddings=True)
+
+        batch_embs = get_embeddings(batch_texts, client)
         embeddings.extend(batch_embs)
-        
+
         # Progress every 500 chunks
         if batch_end % 500 == 0 or batch_end == total_chunks:
             progress = batch_end / total_chunks * 100
             elapsed = time.time() - embed_start
-            rate = batch_end / elapsed
+            rate = batch_end / elapsed if elapsed > 0 else 0
             eta = (total_chunks - batch_end) / rate if rate > 0 else 0
             logger.info(f"   {batch_end}/{total_chunks} ({progress:.0f}%) | {rate:.0f} chunks/s | ETA: {eta:.0f}s")
-        
-        # Clear MPS cache periodically
-        if device == "mps" and batch_end % 1000 == 0:
-            torch.mps.empty_cache()
-            gc.collect()
     
     embed_time = time.time() - embed_start
     logger.info(f"✅ Embedding complete in {embed_time:.1f}s ({total_chunks/embed_time:.0f} chunks/s)")

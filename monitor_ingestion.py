@@ -8,7 +8,8 @@ import os
 import time
 from dotenv import load_dotenv
 
-load_dotenv('/Users/rafaelpimentel/Downloads/atosnormativos/.env')
+from pathlib import Path
+load_dotenv(Path(__file__).parent / '.env')
 
 async def monitor():
     conn = await asyncpg.connect(

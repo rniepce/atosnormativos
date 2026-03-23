@@ -10,13 +10,6 @@ CPU-ONLY Safe Ingestion Script v3
 - Resume-safe (skips already ingested files)
 """
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = ""
-os.environ["PYTORCH_MPS_HIGH_WATERMARK_RATIO"] = "0.0"
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
-
-import torch
-torch.set_default_device("cpu")
-
 import sys
 import asyncio
 import asyncpg
@@ -24,13 +17,14 @@ import subprocess
 import time
 import re
 import logging
-import gc
 from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dotenv import load_dotenv
-from sentence_transformers import SentenceTransformer
+from openai import AzureOpenAI
 
-load_dotenv("/Users/rafaelpimentel/Downloads/atosnormativos/.env")
+from src.ingestion.common import build_metadata_from_path, get_embeddings
+
+load_dotenv(os.path.join(os.path.dirname(__file__), '..', '..', '.env'))
 
 logging.basicConfig(
     level=logging.INFO,
@@ -43,7 +37,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ============= CONFIGURATION =============
-SOURCE_DIR = Path("/Users/rafaelpimentel/Downloads/word")
+SOURCE_DIR = Path(os.getenv("SOURCE_DIR", str(Path(__file__).parent.parent.parent / "data")))
 CHUNK_SIZE = 1500
 CHUNK_OVERLAP = 300
 EMBED_BATCH = 16
@@ -96,6 +90,8 @@ def sanitize_text(text: str) -> str:
     return text
 
 
+# TODO: considerar migrar para common.py
+# (esta versao roda em process pool e sanitiza o texto, diferente de common.extract_text)
 def extract_single_file(file_path_str: str) -> tuple:
     """Extract text from a single file (runs in process pool)."""
     file_path = Path(file_path_str)
@@ -114,6 +110,8 @@ def extract_single_file(file_path_str: str) -> tuple:
         return (file_path_str, None, str(e)[:50])
 
 
+# TODO: considerar migrar para common.py
+# (esta versao usa constantes de modulo CHUNK_SIZE/CHUNK_OVERLAP e faz head+tail sampling)
 def chunk_text(text: str) -> list:
     """Chunk text with head+tail sampling for large docs."""
     chunks = []
@@ -133,44 +131,16 @@ def chunk_text(text: str) -> list:
     return chunks
 
 
-def extract_metadata(file_path: Path) -> dict:
-    """Extract metadata from filename and folder."""
-    folder = file_path.parent.name
-    filename = file_path.stem.lower()
-
-    metadata = {
-        "tipo": folder[:199],
-        "numero": "0",
-        "ano": 0,
-        "orgao": "TJMG",
-        "status": "VIGENTE",
-        "assunto_resumo": folder,
-        "tags": []
-    }
-
-    patterns = [
-        r"(\d{3,5})(\d{4})$",
-        r"(\d{1,4})[_\-](\d{4})",
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, filename)
-        if match:
-            metadata["numero"] = str(int(match.group(1)))
-            year = int(match.group(2))
-            if 1900 <= year <= 2030:
-                metadata["ano"] = year
-            break
-
-    return metadata
-
-
 async def main():
     start_total = time.time()
 
-    # Load model on CPU
-    logger.info("🚀 Loading BGE-large model on CPU...")
-    model = SentenceTransformer("BAAI/bge-large-en-v1.5", device="cpu")
-    logger.info(f"✅ Model loaded on CPU! Dim: {model.get_sentence_embedding_dimension()}")
+    # Azure OpenAI client
+    client = AzureOpenAI(
+        api_key=os.getenv("AZURE_API_KEY"),
+        api_version=os.getenv("AZURE_API_VERSION", "2024-02-01"),
+        azure_endpoint=os.getenv("AZURE_ENDPOINT"),
+    )
+    logger.info("✅ Azure OpenAI client ready (text-embedding-3-large, 1024-dim)")
 
     # DB Connection
     try:
@@ -265,11 +235,11 @@ async def main():
             all_embeddings = []
             for batch_start in range(0, len(chunks), EMBED_BATCH):
                 batch = chunks[batch_start:batch_start + EMBED_BATCH]
-                embs = model.encode(batch, show_progress_bar=False, normalize_embeddings=True)
+                embs = get_embeddings(batch, client)
                 all_embeddings.extend(embs)
 
             # Metadata
-            meta = extract_metadata(file_path)
+            meta = build_metadata_from_path(file_path)
 
             # Ensure connection before DB write
             conn = await ensure_connection(conn)
