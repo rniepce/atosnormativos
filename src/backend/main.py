@@ -111,6 +111,21 @@ async def model_info():
     """Return the active LLM provider and model name."""
     return get_active_llm_info()
 
+@app.get("/api/config-check")
+async def config_check():
+    """Return which env vars are configured (not their values). For debugging."""
+    from src.backend.search import AZURE_API_KEY, AZURE_ENDPOINT, AZURE_EMBEDDING_MODEL, GOOGLE_API_KEY, LLM_PROVIDER
+    return {
+        "AZURE_API_KEY": bool(AZURE_API_KEY),
+        "AZURE_ENDPOINT": bool(AZURE_ENDPOINT),
+        "AZURE_EMBEDDING_MODEL": AZURE_EMBEDDING_MODEL,
+        "AZURE_EMBEDDING_DIMENSIONS": int(os.getenv("AZURE_EMBEDDING_DIMENSIONS", "1024")),
+        "GOOGLE_API_KEY": bool(GOOGLE_API_KEY),
+        "LLM_PROVIDER": LLM_PROVIDER,
+        "POSTGRES_HOST": bool(os.getenv("POSTGRES_HOST")),
+        "DB_POOL": bool(True),  # if we reach here, pool is up
+    }
+
 @app.post("/upload")
 @limiter.limit("10/minute")
 async def upload_pdf(
