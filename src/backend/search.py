@@ -25,8 +25,8 @@ GOOGLE_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 # ── Azure AI Foundry Configuration ──────────────────────────────
 AZURE_API_KEY = os.getenv("AZURE_API_KEY")
 AZURE_ENDPOINT = os.getenv("AZURE_ENDPOINT", "https://assistente-web-resource.cognitiveservices.azure.com/")
-AZURE_API_VERSION = os.getenv("AZURE_API_VERSION", "2025-01-01-preview")
-AZURE_LLM_MODEL = os.getenv("AZURE_LLM_MODEL", "gpt-4.1-mini")
+AZURE_API_VERSION = os.getenv("AZURE_API_VERSION", "2024-12-01-preview")
+AZURE_LLM_MODEL = os.getenv("AZURE_LLM_MODEL", "gpt-5.4-mini")
 AZURE_EMBEDDING_MODEL = os.getenv("AZURE_EMBEDDING_MODEL", "text-embedding-3-large")
 AZURE_EMBEDDING_DIMENSIONS = int(os.getenv("AZURE_EMBEDDING_DIMENSIONS", "1024"))
 
