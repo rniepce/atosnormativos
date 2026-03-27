@@ -16,11 +16,17 @@ class DocumentStorage:
         try:
             async with conn.transaction():
                 # 1. Insert Document
-                # "tags" is a list, needs valid postgres array literal or let asyncpg handle it
-                
+                # Coerce types to avoid asyncpg type mismatch errors
+                try:
+                    ano = int(metadata.get("ano") or 0)
+                except (ValueError, TypeError):
+                    ano = 0
+                numero = str(metadata.get("numero") or "0")
+                tags = [str(t) for t in (metadata.get("tags") or [])]
+
                 doc_query = """
-                    INSERT INTO documentos (filename, gcs_uri, tipo, numero, ano, status_vigencia, assunto_resumo, tags)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                    INSERT INTO documentos (filename, gcs_uri, tipo, numero, ano, orgao, status_vigencia, assunto_resumo, tags)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                     RETURNING id
                 """
                 doc_id = await conn.fetchval(
@@ -28,11 +34,12 @@ class DocumentStorage:
                     filename,
                     gcs_uri,
                     metadata.get("tipo"),
-                    metadata.get("numero"),
-                    metadata.get("ano"),
+                    numero,
+                    ano,
+                    metadata.get("orgao"),
                     metadata.get("status"),
                     metadata.get("assunto_resumo"),
-                    metadata.get("tags", [])
+                    tags,
                 )
                 
                 logger.info(f"Inserted document ID: {doc_id}")
