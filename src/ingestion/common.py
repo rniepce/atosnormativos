@@ -99,7 +99,7 @@ def extract_text(file_path: Path, timeout: int = 30) -> Optional[str]:
 # Token-aware truncation
 # ---------------------------------------------------------------------------
 
-def truncate_to_token_limit(text: str, max_tokens: int = 8000) -> str:
+def truncate_to_token_limit(text: str, max_tokens: int = 7000) -> str:
     """Truncate *text* so it stays within the embedding model's token window.
 
     Uses a simple heuristic: 1 token ~ 4 characters in Portuguese.
@@ -294,7 +294,7 @@ async def _embed_with_retry_async(
     model: str = AZURE_EMBEDDING_MODEL,
     dimensions: int = AZURE_EMBEDDING_DIMENSIONS,
     max_retries: int = 3,
-    base_delay: float = 1.0,
+    base_delay: float = 5.0,
 ) -> List[List[float]]:
     """Async version of :func:`_embed_with_retry_sync`."""
     for attempt in range(max_retries):

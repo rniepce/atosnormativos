@@ -7,13 +7,13 @@ CREATE TABLE IF NOT EXISTS documentos (
     id SERIAL PRIMARY KEY,
     filename TEXT NOT NULL,
     gcs_uri TEXT,
-    tipo VARCHAR(50),
-    numero VARCHAR(20),
+    tipo TEXT,
+    numero VARCHAR(50),
     ano INTEGER,
-    orgao VARCHAR(100), -- Órgão emissor (Presidência, Corregedoria, etc.)
+    orgao TEXT, -- Órgão emissor (Presidência, Corregedoria, etc.)
     status_vigencia VARCHAR(20), -- 'VIGENTE', 'REVOGADO'
     assunto_resumo TEXT,
-    tags TEXT[], 
+    tags TEXT[],
     data_upload TIMESTAMP DEFAULT NOW()
 );
 
