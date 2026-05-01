@@ -127,6 +127,45 @@ async def config_check():
         "DB_POOL": bool(True),  # if we reach here, pool is up
     }
 
+
+_FACETS_CACHE: dict | None = None
+
+
+@app.get("/api/facets")
+async def facets():
+    """Return distinct values for sidebar filter selects.
+
+    Cached at module level after first load — facets change only on ingestion.
+    """
+    global _FACETS_CACHE
+    if _FACETS_CACHE is not None:
+        return _FACETS_CACHE
+    from src.utils.db import get_db_connection, release_db_connection
+    conn = await get_db_connection()
+    try:
+        tipo_rows = await conn.fetch(
+            "SELECT tipo, COUNT(*) c FROM documentos WHERE tipo IS NOT NULL AND tipo <> '' "
+            "GROUP BY tipo ORDER BY c DESC"
+        )
+        orgao_rows = await conn.fetch(
+            "SELECT orgao, COUNT(*) c FROM documentos WHERE orgao IS NOT NULL AND orgao <> '' "
+            "GROUP BY orgao ORDER BY c DESC LIMIT 50"
+        )
+        ano_rows = await conn.fetch(
+            "SELECT DISTINCT ano FROM documentos WHERE ano IS NOT NULL AND ano > 0 ORDER BY ano"
+        )
+        total = await conn.fetchval("SELECT COUNT(*) FROM documentos")
+    finally:
+        await release_db_connection(conn)
+
+    _FACETS_CACHE = {
+        "tipos": [r["tipo"] for r in tipo_rows],
+        "orgaos": [r["orgao"] for r in orgao_rows],
+        "anos": [r["ano"] for r in ano_rows],
+        "total": int(total or 0),
+    }
+    return _FACETS_CACHE
+
 @app.post("/upload")
 @limiter.limit("10/minute")
 async def upload_pdf(

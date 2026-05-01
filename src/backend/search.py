@@ -381,6 +381,10 @@ ORDEM DE RELEVÂNCIA (números separados por vírgula):"""
                 idx = add_param(request.filter_tipo)
                 where_clauses.append(f"d.tipo = ${idx}")
 
+            if request.filter_orgao:
+                idx = add_param(request.filter_orgao)
+                where_clauses.append(f"d.orgao = ${idx}")
+
             if request.filter_ano:
                 idx = add_param(request.filter_ano)
                 where_clauses.append(f"d.ano = ${idx}")

@@ -11,8 +11,10 @@
   --surface-chat-bot: #F3F4F6;
   --text-primary: #111827;
   --text-secondary: #4B5563;
-  --text-muted: #9CA3AF;
+  --text-muted: #6B7280;            /* WCAG AA: 4.69:1 contrast on #FFFFFF (was #9CA3AF, 2.85:1) */
+  --text-on-tinted: #374151;
   --border: #E5E7EB;
+  --focus-ring: 0 0 0 2px rgba(215, 40, 47, 0.45);
   --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
   --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
   --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.05), 0 4px 6px -2px rgba(0, 0, 0, 0.025);
@@ -20,6 +22,22 @@
   --radius-sm: 8px;
   --radius-lg: 16px;
   --transition: all 0.2s ease-in-out;
+}
+
+/* Visible keyboard focus across the app */
+:where(button, a, input, select, textarea, [role="button"]):focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: var(--radius-sm);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 * {
@@ -165,7 +183,7 @@ html, body, #root {
 }
 
 .btn-primary {
-  background: linear-gradient(135deg, #D93B52, #B91B32);
+  background: linear-gradient(135deg, var(--tjmg-red-light), var(--tjmg-red-dark));
   color: white;
   border: none;
   border-radius: var(--radius-sm);
@@ -185,6 +203,355 @@ html, body, #root {
 
 .btn-primary:hover {
   background: var(--tjmg-red-dark);
+}
+
+/* ── Sidebar nav items ──────────────────────────── */
+.sidebar-section { display: flex; flex-direction: column; }
+
+.section-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0.5rem 0;
+  font-family: inherit;
+  text-align: left;
+  color: var(--text-on-tinted);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.section-toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.section-toggle-label svg { color: currentColor; }
+
+.section-toggle-title {
+  font-weight: 600;
+  font-size: 0.95rem;
+  display: flex;
+  flex-direction: column;
+}
+
+.section-toggle-sub {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.section-chevron {
+  color: var(--text-muted);
+  transition: transform 0.2s ease;
+}
+
+.section-toggle[aria-expanded="true"] .section-chevron {
+  transform: rotate(180deg);
+}
+
+.section-body {
+  padding: 0.25rem 0 0.6rem 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.section-divider {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 0;
+}
+
+.sidebar-info {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  color: var(--text-on-tinted);
+  font-weight: 500;
+  font-size: 0.95rem;
+}
+
+.sidebar-info svg { color: currentColor; }
+
+.field-label {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  margin-bottom: 0.2rem;
+  display: block;
+}
+
+.radio-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.radio-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+  color: var(--text-primary);
+}
+
+.radio-option-meta {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+/* ── Empty state ────────────────────────────────── */
+.empty-state {
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 2rem 1rem;
+  gap: 1.25rem;
+}
+
+.empty-state-title {
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.empty-state-subtitle {
+  font-size: 0.95rem;
+  color: var(--text-secondary);
+  max-width: 520px;
+  margin: 0;
+  line-height: 1.5;
+}
+
+.empty-state-stats {
+  display: flex;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+  justify-content: center;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.empty-state-stats strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.example-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 0.75rem;
+  width: 100%;
+  max-width: 720px;
+  margin-top: 0.5rem;
+}
+
+.example-card {
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.85rem 1rem;
+  font-size: 0.9rem;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: var(--transition);
+  font-family: inherit;
+  line-height: 1.4;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.example-card:hover {
+  border-color: var(--tjmg-red-light);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-sm);
+}
+
+.example-card-tag {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--tjmg-red);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 0.25rem;
+}
+
+/* ── Disclaimer banner ─────────────────────────── */
+.ai-disclaimer {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 0 0.5rem;
+  margin-top: 0.4rem;
+  line-height: 1.4;
+}
+
+/* ── Active filter chips ───────────────────────── */
+.active-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+}
+
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.75rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.2rem 0.7rem;
+  color: var(--text-on-tinted);
+}
+
+.filter-chip-remove {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  width: 16px;
+  height: 16px;
+  font-size: 0.85rem;
+  line-height: 1;
+}
+
+.filter-chip-remove:hover { color: var(--tjmg-red); }
+
+/* ── Source improvements ───────────────────────── */
+.source-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+}
+
+.relevance-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.relevance-high   { background: #DCFCE7; color: #14532D; }
+.relevance-medium { background: #FEF3C7; color: #713F12; }
+.relevance-low    { background: #E0E7FF; color: #312E81; }
+
+.relevance-bar {
+  display: inline-block;
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(0,0,0,0.1);
+  position: relative;
+  overflow: hidden;
+}
+
+.relevance-bar-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: currentColor;
+  border-radius: 2px;
+}
+
+.source-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.8rem;
+  color: var(--tjmg-red);
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.source-link:hover { text-decoration: underline; }
+
+.source-extra-chunks {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: 0.3rem;
+  font-style: italic;
+}
+
+/* ── Post-response message actions ─────────────── */
+.message-actions {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+  opacity: 0.7;
+}
+
+.message-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  padding: 0.3rem 0.6rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-family: inherit;
+  transition: var(--transition);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.message-action-btn:hover {
+  background: var(--surface);
+  color: var(--text-primary);
+  border-color: var(--text-muted);
+}
+
+/* ── Logo image ─────────────────────────────────── */
+.sidebar-logo-img {
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+/* ── Skip link (a11y) ──────────────────────────── */
+.skip-link {
+  position: absolute;
+  top: -40px;
+  left: 0.5rem;
+  background: var(--tjmg-red);
+  color: white;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius-sm);
+  text-decoration: none;
+  font-size: 0.85rem;
+  z-index: 200;
+  transition: top 0.2s ease;
+}
+
+.skip-link:focus-visible {
+  top: 0.5rem;
 }
 
 .btn-upload {

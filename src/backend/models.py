@@ -5,6 +5,7 @@ class SearchRequest(BaseModel):
     query: str
     filter_status: Optional[str] = Field(None, description="Filter by status (e.g., VIGENTE)")
     filter_tipo: Optional[str] = Field(None, description="Filter by document type")
+    filter_orgao: Optional[str] = Field(None, description="Filter by issuing organ")
     filter_ano: Optional[int] = Field(None, description="Filter by year")
     prioritize_vigente: bool = Field(True, description="Boost VIGENTE documents in ranking")
     use_hybrid_search: bool = Field(True, description="Combine vector + keyword search")

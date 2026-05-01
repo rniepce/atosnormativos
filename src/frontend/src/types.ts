@@ -1,5 +1,7 @@
 /** A single source/chunk returned from the search API. */
 export interface Source {
+  document_id?: number;
+  filename?: string;
   tipo?: string;
   numero?: string;
   ano?: number;
@@ -27,9 +29,18 @@ export interface SearchPayload {
   query: string;
   filter_status?: string;
   filter_tipo?: string;
+  filter_orgao?: string;
   filter_ano?: number;
   google_api_key?: string;
   selected_model?: string;
+}
+
+/** Response from GET /api/facets — populates sidebar filter selects. */
+export interface FacetsResponse {
+  tipos: string[];
+  orgaos: string[];
+  anos: number[];
+  total: number;
 }
 
 /** Response from POST /upload. */
@@ -54,6 +65,8 @@ export interface SidebarProps {
   setFilterStatus: (v: string) => void;
   filterTipo: string;
   setFilterTipo: (v: string) => void;
+  filterOrgao: string;
+  setFilterOrgao: (v: string) => void;
   filterAno: string;
   setFilterAno: (v: string) => void;
   selectedModel: string;
@@ -65,6 +78,7 @@ export interface SidebarProps {
   isUploading: boolean;
   isOpen: boolean;
   onClose: () => void;
+  facets: FacetsResponse | null;
 }
 
 /** Props for the ChatMessage component. */
